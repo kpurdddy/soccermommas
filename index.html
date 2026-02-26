@@ -8,11 +8,12 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body, #root { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; font-family: 'Segoe UI', Arial, sans-serif; }
+html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe UI', Arial, sans-serif; }
+#root { min-height: 100%; }
 
 .title-screen {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  height: 100%; color: white; text-align: center; padding: 20px;
+  min-height: 70vh; color: white; text-align: center; padding: 20px;
 }
 .title-screen h1 { font-size: 3.5em; margin-bottom: 20px; letter-spacing: 2px; }
 .title-screen .subtitle { font-size: 1.3em; margin-bottom: 12px; color: #ccc; }
@@ -26,7 +27,7 @@ html, body, #root { width: 100%; height: 100%; overflow: hidden; background: #1a
 
 .game-container {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  height: 100%; width: 100%; padding: 8px; touch-action: none;
+  height: 100vh; width: 100%; padding: 8px; touch-action: none; overflow: hidden;
 }
 .hud {
   display: flex; justify-content: space-between; align-items: center;
@@ -39,25 +40,39 @@ html, body, #root { width: 100%; height: 100%; overflow: hidden; background: #1a
   position: fixed; bottom: 4px; right: 8px; color: rgba(255,255,255,0.3);
   font-size: 0.7em; pointer-events: none;
 }
-.portrait-message {
-  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  background: #1a1a2e; color: white; flex-direction: column;
-  align-items: center; justify-content: center; text-align: center;
-  z-index: 9999; font-family: 'Segoe UI', Arial, sans-serif;
+.landing-wrapper { width: 100%; }
+.landing-content {
+  max-width: 700px; margin: 0 auto; padding: 20px 24px 60px;
+  color: #ccc; font-size: 1em; line-height: 1.6;
 }
-.portrait-message .rotate-icon { font-size: 4em; margin-bottom: 20px; }
-.portrait-message .rotate-text { font-size: 1.2em; padding: 0 20px; color: #ccc; }
-@media (orientation: portrait) {
-  #root { display: none !important; }
-  .portrait-message { display: flex !important; }
+.landing-card {
+  background: rgba(255,255,255,0.06); border-radius: 8px;
+  padding: 20px; margin-bottom: 20px;
 }
+.feedback-card { text-align: center; }
+.feedback-btn {
+  display: inline-block; margin-top: 12px; padding: 14px 40px;
+  background: #27ae60; color: white; font-size: 1.2em; font-weight: bold;
+  border-radius: 8px; text-decoration: none; transition: background 0.2s;
+}
+.feedback-btn:hover { background: #2ecc71; }
+.landing-heading { color: white; font-size: 1.6em; margin: 32px 0 16px; }
+.landing-text { margin-bottom: 20px; }
+.landing-text strong { color: white; }
+.highlight { color: #2ecc71; font-weight: bold; }
+.mode-card { border-left: 4px solid #27ae60; }
+.mode-card h3 { color: white; margin-bottom: 8px; font-size: 1.2em; }
+.mode-card p { color: #ccc; }
+.landscape-note { font-size: 0.85em; color: #888; text-align: center; margin: 20px 0; }
+.landing-caption { color: #aaa; margin-bottom: 8px; }
+.alpha-links { display: flex; flex-direction: column; gap: 8px; }
+.alpha-links a { color: #2ecc71; text-decoration: none; }
+.alpha-links a:hover { text-decoration: underline; }
+.landing-divider { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 32px 0 20px; }
+.experimental-note { color: #777; font-style: italic; font-size: 0.9em; }
 </style>
 </head>
 <body>
-<div class="portrait-message">
-  <div class="rotate-icon">&#x21bb;</div>
-  <div class="rotate-text">Rotate your phone for the best experience</div>
-</div>
 <div id="root"></div>
 <script>
 'use strict';
@@ -997,6 +1012,17 @@ function App() {
     return () => window.removeEventListener('resize', calcDims);
   }, [calcDims]);
 
+  // Toggle scroll: allow on title screen, lock during gameplay
+  useEffect(() => {
+    if (gameState.phase === 'title') {
+      document.documentElement.style.overflow = 'auto';
+      document.body.style.overflow = 'auto';
+    } else {
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+    }
+  }, [gameState.phase]);
+
   // Game tick
   useEffect(() => {
     if (gameState.phase === 'title') return;
@@ -1074,17 +1100,72 @@ function App() {
     }
   }, [dispatch, fieldDims]);
 
-  // TITLE SCREEN
+  // TITLE SCREEN + LANDING PAGE
   if (gameState.phase === 'title') {
-    return React.createElement('div', { className: 'title-screen' },
-      React.createElement('h1', null, 'Soccer Mamas'),
-      React.createElement('div', { className: 'subtitle' },
-        'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
+    return React.createElement('div', { className: 'landing-wrapper' },
+      React.createElement('div', { className: 'title-screen' },
+        React.createElement('h1', null, 'Soccer Mamas'),
+        React.createElement('div', { className: 'subtitle' },
+          'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
+        ),
+        React.createElement('div', { className: 'version' }, 'Alpha 1.0.1 test build'),
+        React.createElement('button', {
+          onClick: () => dispatch({ type: 'START_GAME' })
+        }, 'KICK OFF')
       ),
-      React.createElement('div', { className: 'version' }, 'Alpha 1.0 test build'),
-      React.createElement('button', {
-        onClick: () => dispatch({ type: 'START_GAME' })
-      }, 'KICK OFF')
+      React.createElement('div', { className: 'landing-content' },
+        // Feedback section
+        React.createElement('div', { className: 'landing-card feedback-card' },
+          React.createElement('p', null, 'Played it? Broke it? Have thoughts? Let me know.'),
+          React.createElement('a', {
+            href: 'https://docs.google.com/forms/d/e/1FAIpQLScpBfQ2cYIZmZngcsAf6fN7LhZ4EnUeMTZ7wswL-0FovC4c0g/viewform?usp=header',
+            target: '_blank', rel: 'noopener noreferrer', className: 'feedback-btn'
+          }, 'Give Feedback')
+        ),
+        // About the Project
+        React.createElement('h2', { className: 'landing-heading' }, 'About the Project'),
+        React.createElement('p', { className: 'landing-text' },
+          'This is a game design project, primarily for ',
+          React.createElement('strong', null, 'teaching and learning'),
+          ' about soccer and football. Soccer Mamas is a very rough first-draft prototype. Everything is Alpha versioned -- not expected to completely work.'
+        ),
+        // Game Mode
+        React.createElement('div', { className: 'landing-card mode-card' },
+          React.createElement('h3', null, 'Game Mode'),
+          React.createElement('p', null,
+            React.createElement('strong', { className: 'highlight' }, 'Single and two-player'),
+            ' (on separate devices). Gets closer to realism in scoring and ball movement at higher tiers -- from Kickabout (training wheels, lots of goals) through Friendly, League Match, and Cup Final.'
+          )
+        ),
+        // Sandbox Mode
+        React.createElement('div', { className: 'landing-card mode-card' },
+          React.createElement('h3', null, 'Sandbox Mode'),
+          React.createElement('p', null, 'Manual placement of all players for instruction purposes. Run the game from that point to show the importance of positioning and setting up plays. For coaches and players learning the game.')
+        ),
+        // Personality powers
+        React.createElement('p', { className: 'landing-text' },
+          'On the map: ',
+          React.createElement('strong', null, 'individual player personalities'),
+          ' with corresponding special abilities -- grouchy (other players avoid), garrulous (teammates congregate around), scary (clears a lane), always on the phone (good at longer distance plays) -- and ',
+          React.createElement('strong', null, 'specific names and avatars/photographs'),
+          ' for teaching or just for fun.'
+        ),
+        // Landscape note
+        React.createElement('p', { className: 'landscape-note' }, 'Best played in landscape mode'),
+        // Other alphas
+        React.createElement('div', { className: 'landing-card' },
+          React.createElement('p', { className: 'landing-caption' }, 'Other testing alphas in the same project:'),
+          React.createElement('div', { className: 'alpha-links' },
+            React.createElement('a', { href: 'https://kpurdddy.github.io/soccermommas/', target: '_blank', rel: 'noopener noreferrer' }, 'Soccer Mamas'),
+            React.createElement('a', { href: 'https://kpurdddy.github.io/Hailmarys/', target: '_blank', rel: 'noopener noreferrer' }, 'Hail Marys (tactical football)')
+          )
+        ),
+        // Experimental note
+        React.createElement('hr', { className: 'landing-divider' }),
+        React.createElement('p', { className: 'experimental-note' },
+          'This is an experimental project. It could prove too ambitious, but that\'s the point of trying. Someone else might take it over -- we\'ll see.'
+        )
+      )
     );
   }
 
@@ -1272,7 +1353,7 @@ function App() {
     ),
 
     // Version text
-    React.createElement('div', { className: 'version-text' }, 'Soccer Mamas \u2014 Alpha 1.0 test build')
+    React.createElement('div', { className: 'version-text' }, 'Soccer Mamas -- Alpha 1.0.1')
   );
 }
 
