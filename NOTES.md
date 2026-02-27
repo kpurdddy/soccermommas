@@ -1,5 +1,14 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 1.3.0 (2026-02-27)
+- Full-screen field: HUD removed from document flow, field now fills entire viewport edge-to-edge (padding: 0, no height reservations)
+- HUD overlay: version text and score/half/clock rendered as absolute-positioned overlays inside the field wrapper with semi-transparent dark pill backgrounds
+- Version text hidden on narrow screens (portrait) via media query
+- All game overlays (GOAL!, SAVE!, KICK OFF, HALFTIME, FULL TIME) set to z-index: 100 to render above HUD (z-index: 10)
+- Feedback button: replaced dead Google Form link with mailto:remote-tank-halves@duck.com
+- Landing page: added "This is the design idea:" to end of About the Project paragraph
+- Version updated to Alpha 1.3.0
+
 ## Alpha 1.2.1 (2026-02-27)
 - Prominent version HUD: "Alpha 1.2.1 -- test build" now centered, bold, white, 1.2em on its own top row; score/clock/half on second row below
 - HUD height allowance increased from 44px to 64px for two-row layout

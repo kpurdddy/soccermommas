@@ -27,28 +27,18 @@ html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe
 
 .game-container {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  height: 100dvh; width: 100%; padding: 0; touch-action: none; overflow: hidden;
+  height: 100dvh; width: 100%; padding: 8px; touch-action: none; overflow: hidden;
 }
-.hud-overlay {
-  position: absolute; top: 0; left: 0; width: 100%; z-index: 10;
-  display: flex; justify-content: center; align-items: center;
-  padding: 4px 12px; pointer-events: none;
+.hud {
+  display: flex; justify-content: space-between; align-items: center;
+  width: 100%; max-width: 100%; padding: 4px 12px; color: white; font-size: 1.1em;
 }
-.hud-pill {
-  display: flex; align-items: center; gap: 16px;
-  background: rgba(0,0,0,0.35); border-radius: 6px; padding: 2px 10px;
-  color: white; font-size: 1.1em; pointer-events: none;
-}
-.hud-pill .score { font-weight: bold; font-size: 1.3em; }
-.hud-pill .clock { color: #ccc; font-variant-numeric: tabular-nums; }
-.hud-pill .half { color: #ccc; font-size: 0.9em; }
-.hud-version {
-  position: absolute; top: 4px; left: 8px; z-index: 10;
-  background: rgba(0,0,0,0.35); border-radius: 6px; padding: 2px 8px;
-  color: white; font-size: 0.85em; font-weight: bold; pointer-events: none;
-}
-@media (max-width: 600px) {
-  .hud-version { display: none; }
+.hud .score { font-weight: bold; font-size: 1.3em; }
+.hud .clock { color: #aaa; font-variant-numeric: tabular-nums; }
+.hud .half { color: #aaa; font-size: 0.9em; }
+.version-text {
+  position: fixed; bottom: 4px; right: 8px; color: rgba(255,255,255,0.3);
+  font-size: 0.7em; pointer-events: none;
 }
 .landing-wrapper { width: 100%; }
 .landing-content {
@@ -1149,12 +1139,12 @@ function App() {
 
   // Calculate field dimensions
   var calcDims = useCallback(function() {
-    var pad = 0;
+    var pad = 8;
     var vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
     var vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 
-    var maxW = vw;
-    var maxH = vh;
+    var maxW = vw - pad * 2;
+    var maxH = vh - 64 - pad * 2;
 
     // Unlock aspect ratio: use all available space
     var w = maxW;
@@ -1291,7 +1281,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 1.3.0 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 1.2.1 -- test build'),
         React.createElement('button', {
           onClick: () => dispatch({ type: 'START_GAME' })
         }, 'KICK OFF')
@@ -1301,8 +1291,8 @@ function App() {
         React.createElement('div', { className: 'landing-card feedback-card' },
           React.createElement('p', null, 'Played it? Broke it? Have thoughts? Let me know.'),
           React.createElement('a', {
-            href: 'mailto:remote-tank-halves@duck.com?subject=Soccer%20Mamas%20Feedback',
-            className: 'feedback-btn'
+            href: 'https://docs.google.com/forms/d/e/1FAIpQLScpBfQ2cYIZmZngcsAf6fN7LhZ4EnUeMTZ7wswL-0FovC4c0g/viewform?usp=header',
+            target: '_blank', rel: 'noopener noreferrer', className: 'feedback-btn'
           }, 'Give Feedback')
         ),
         // About the Project
@@ -1310,7 +1300,7 @@ function App() {
         React.createElement('p', { className: 'landing-text' },
           'This is a game design project, primarily for ',
           React.createElement('strong', null, 'teaching and learning'),
-          ' about soccer and football. Soccer Mamas is a very rough first-draft prototype. Everything is Alpha versioned -- not expected to completely work. This is the design idea:'
+          ' about soccer and football. Soccer Mamas is a very rough first-draft prototype. Everything is Alpha versioned -- not expected to completely work.'
         ),
         // Game Mode
         React.createElement('div', { className: 'landing-card mode-card' },
@@ -1373,21 +1363,23 @@ function App() {
   const showShootIndicator = homeCarrier && Math.abs(homeGoalX - homeCarrier.x) <= SHOOT_RANGE_X;
 
   return React.createElement('div', { className: 'game-container', ref: containerRef },
+    // HUD
+    React.createElement('div', { style: { width: '100%', maxWidth: fw, textAlign: 'center' } },
+      React.createElement('div', {
+        style: { color: 'white', fontSize: '1.2em', fontWeight: 'bold', padding: '4px 0 2px', letterSpacing: '1px' }
+      }, 'Alpha 1.2.1 -- test build'),
+      React.createElement('div', { className: 'hud', style: { maxWidth: fw } },
+        React.createElement('span', { className: 'half' },
+          (gameState.possession === 'home' ? '\u{1F7E6} ' : '\u{1F7E5} ') + halfStr),
+        React.createElement('span', { className: 'score' },
+          gameState.score.home + ' \u2014 ' + gameState.score.away
+        ),
+        React.createElement('span', { className: 'clock' }, clockStr)
+      )
+    ),
+
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
-      // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 1.3.0 -- test build'),
-      // HUD overlay - score/half/clock
-      React.createElement('div', { className: 'hud-overlay' },
-        React.createElement('div', { className: 'hud-pill' },
-          React.createElement('span', { className: 'half' },
-            (gameState.possession === 'home' ? '\u{1F7E6} ' : '\u{1F7E5} ') + halfStr),
-          React.createElement('span', { className: 'score' },
-            gameState.score.home + ' \u2014 ' + gameState.score.away
-          ),
-          React.createElement('span', { className: 'clock' }, clockStr)
-        )
-      ),
       React.createElement('svg', {
         ref: fieldRef,
         width: fw, height: fh,
@@ -1476,7 +1468,7 @@ function App() {
         style: {
           position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none', zIndex: 100,
+          pointerEvents: 'none',
         }
       }, React.createElement('div', {
         style: {
@@ -1492,7 +1484,7 @@ function App() {
         style: {
           position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none', zIndex: 100,
+          pointerEvents: 'none',
         }
       }, React.createElement('div', {
         style: {
@@ -1508,7 +1500,7 @@ function App() {
         style: {
           position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none', zIndex: 100,
+          pointerEvents: 'none',
         }
       }, React.createElement('div', {
         style: {
@@ -1524,7 +1516,7 @@ function App() {
         style: {
           position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.5)', cursor: 'pointer', zIndex: 100,
+          background: 'rgba(0,0,0,0.5)', cursor: 'pointer',
         },
         onPointerDown: () => dispatch({ type: 'START_SECOND_HALF' }),
       },
@@ -1547,7 +1539,7 @@ function App() {
         style: {
           position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.6)', zIndex: 100,
+          background: 'rgba(0,0,0,0.6)',
         },
       },
         React.createElement('div', {
