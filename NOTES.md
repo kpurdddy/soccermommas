@@ -1,5 +1,12 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 1.3.1 (2026-02-27)
+- Fix save crash: declared `var targetX = goalX` in executeShot and changed shot object to use `targetX: targetX` so saves animate toward keeper position
+- Fix mobile tap highlight: added `-webkit-tap-highlight-color: transparent` to universal reset
+- Tap sounds via Web Audio API: tic (pass/run taps), kick (shooting), whistle (kickoff) -- synthesized tones, no external files
+- AudioSys.init() on first interaction handles browser autoplay policy
+- Version updated to Alpha 1.3.1
+
 ## Alpha 1.3.0 (2026-02-27)
 - Full-screen field: HUD removed from document flow, field now fills entire viewport edge-to-edge (padding: 0, no height reservations)
 - HUD overlay: version text and score/half/clock rendered as absolute-positioned overlays inside the field wrapper with semi-transparent dark pill backgrounds

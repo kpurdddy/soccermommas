@@ -7,7 +7,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe UI', Arial, sans-serif; }
 #root { min-height: 100%; }
 
@@ -86,39 +86,6 @@ html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe
 <div id="root"></div>
 <script>
 'use strict';
-
-var AudioSys = (function() {
-  var ctx = null;
-  function init() {
-    if (!ctx) {
-      var WA = window.AudioContext || window.webkitAudioContext;
-      if (WA) ctx = new WA();
-    }
-    if (ctx && ctx.state === 'suspended') ctx.resume();
-  }
-  function playTone(freq, type, duration, vol) {
-    if (!ctx) return;
-    var osc = ctx.createOscillator();
-    var gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, ctx.currentTime);
-    gain.gain.setValueAtTime(vol, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + duration);
-  }
-  return {
-    init: init,
-    tic: function() { playTone(600, 'sine', 0.1, 0.1); },
-    kick: function() { playTone(150, 'triangle', 0.15, 0.2); },
-    whistle: function() {
-      playTone(2000, 'square', 0.15, 0.05);
-      setTimeout(function() { playTone(2000, 'square', 0.25, 0.05); }, 200);
-    }
-  };
-})();
 
 // ==================== GAME CONSTANTS ====================
 const TICK_MS = 33; // ~30fps
@@ -773,7 +740,6 @@ function executeShot(state, carrierId, aimX, aimY) {
 
   var shootingTeam = carrier.team;
   var goalX = getAttackGoalX(shootingTeam, s.clock.half);
-  var targetX = goalX;
   var distToGoal = Math.abs(goalX - carrier.x);
 
   if (distToGoal > SHOOT_RANGE_X) return state;
@@ -852,7 +818,7 @@ function executeShot(state, carrierId, aimX, aimY) {
   s.shot = {
     result: result, shootingTeam: shootingTeam,
     fromX: carrier.x, fromY: carrier.y,
-    targetX: targetX, targetY: targetY,
+    targetX: goalX, targetY: targetY,
     ticksTotal: SHOT_ANIM_TICKS, ticksElapsed: 0,
   };
   s.phase = 'shot';
@@ -1233,7 +1199,6 @@ function App() {
   }, []);
 
   const handleFieldPointerDown = useCallback((e) => {
-    AudioSys.init();
     const state = stateRef.current;
     if (state.phase !== 'play') return;
     if (state.ball.loose || state.passBall) return;
@@ -1254,7 +1219,6 @@ function App() {
       const inRange = carrier && Math.abs(hGoalX - carrier.x) <= SHOOT_RANGE_X;
       const isGoalTap = hGoalX === 100 ? gx >= 85 : gx <= 15;
       if (inRange && isGoalTap) {
-        AudioSys.kick();
         dispatch({ type: 'SHOOT', aimX: gx, aimY: gy });
         return;
       }
@@ -1273,14 +1237,12 @@ function App() {
         }
       }
 
-      AudioSys.tic();
       if (tappedPlayer && tappedPlayer.id !== state.ball.carrier) {
         dispatch({ type: 'TAP_PLAYER', playerId: tappedPlayer.id });
       } else {
         dispatch({ type: 'TAP_FIELD', x: gx, y: gy });
       }
     } else if (state.possession === 'away') {
-      AudioSys.tic();
       // Check if tap is on a home player
       var tappedPlayer2 = null;
       var minDist2 = Infinity;
@@ -1329,9 +1291,9 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 1.3.1 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 1.3.0 -- test build'),
         React.createElement('button', {
-          onClick: () => { AudioSys.init(); AudioSys.whistle(); dispatch({ type: 'START_GAME' }); }
+          onClick: () => dispatch({ type: 'START_GAME' })
         }, 'KICK OFF')
       ),
       React.createElement('div', { className: 'landing-content' },
@@ -1414,7 +1376,7 @@ function App() {
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 1.3.1 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 1.3.0 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
