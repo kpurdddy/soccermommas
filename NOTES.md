@@ -1,5 +1,16 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 1.2.0 (2026-02-26)
+- Ghost ball fix: interception loop reordered so hard collision (now 2.0 units) evaluates BEFORE checkedBy gate -- balls can no longer skip through defenders
+- Viewport dynamic sizing: aspect ratio unlocked, clamped between 1.4:1 and 2.4:1 -- fills wide phones and tablets properly
+- Tackle cooldown: tacklers now checked for cooldownUntil, preventing immediate re-tackles after losing the ball
+- Tackle rework: successful tackles give ball directly to tackler (not loose ball), tackler auto-bursts 5 units away from contact point
+- SAVE! overlay: new save_display phase shows "SAVE!" text for ~1 second after keeper saves
+- Defensive two-tap system: tap defender to select (green dashed ring), then tap field to position or tap ball carrier to commit tackle; tap selected defender again to deselect
+- selectedDefender cleared on possession changes (interceptions, tackles, out of bounds)
+- Version moved from corner overlay to HUD bar; updated to Alpha 1.2.0
+- Landing page: title screen reduced to 50vh, feedback button shrunk to be secondary to Kick Off
+
 ## Alpha 1.1 (2026-02-26)
 - Viewport fix: switched to 100dvh + visualViewport API for proper mobile sizing, reduced HUD height allowance to 44px, 8px edge padding
 - Shot aiming: tap coordinates now pass through to executeShot; shots go where you tap (clamped to goal mouth), with distance-based scatter
