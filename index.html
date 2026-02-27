@@ -27,7 +27,7 @@ html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe
 
 .game-container {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  height: 100vh; width: 100%; padding: 8px; touch-action: none; overflow: hidden;
+  height: 100dvh; width: 100%; padding: 8px; touch-action: none; overflow: hidden;
 }
 .hud {
   display: flex; justify-content: space-between; align-items: center;
@@ -197,7 +197,7 @@ function updateGame(state, action) {
     case 'TICK': return gameTick(state);
     case 'TAP_PLAYER': return tapPlayer(state, action.playerId);
     case 'TAP_FIELD': return tapField(state, action.x, action.y);
-    case 'SHOOT': return executeShot(state, state.ball.carrier);
+    case 'SHOOT': return executeShot(state, state.ball.carrier, action.aimX, action.aimY);
     case 'TAP_DEFENDER': return tapDefender(state, action.playerId);
     case 'START_SECOND_HALF': return startSecondHalf(state);
     case 'PLAY_AGAIN': return createInitialState();
@@ -337,6 +337,22 @@ function updatePassBall(s) {
     if (pDist > 3) continue;
 
     pb.checkedBy.add(p.id);
+
+    // Hard collision: if ball is within inner radius, automatic interception
+    if (pDist <= 1.0) {
+      p.hasBall = true;
+      p.settlingUntil = s.tick + SETTLING_TICKS;
+      s.ball.carrier = p.id;
+      s.ball.x = p.x;
+      s.ball.y = p.y;
+      s.ball.loose = false;
+      s.possession = p.team;
+      s.passBall = null;
+      s.cpuThreatDetectedTick = null;
+      s.cpuNextStrategyTick = s.tick + 30;
+      return s;
+    }
+
     if (Math.random() < getInterceptionChance(pDist)) {
       // Intercepted!
       p.hasBall = true;
@@ -542,7 +558,9 @@ function cpuPossession(s) {
       s.cpuThreatDetectedTick = null;
       // Reactive: shoot if possible, else pass
       if (canCpuShoot(s, carrier)) {
-        return executeShot(s, carrier.id);
+        var cpuAimX1 = getAttackGoalX('away', s.clock.half);
+        var cpuAimY1 = 38 + Math.random() * 24;
+        return executeShot(s, carrier.id, cpuAimX1, cpuAimY1);
       }
       return cpuPass(s, carrier, 'reactive');
     }
@@ -555,7 +573,9 @@ function cpuPossession(s) {
     s.cpuNextStrategyTick = s.tick + CPU_STRATEGY_INTERVAL;
 
     if (canCpuShoot(s, carrier) && Math.random() < 0.30) {
-      return executeShot(s, carrier.id);
+      var cpuAimX2 = getAttackGoalX('away', s.clock.half);
+      var cpuAimY2 = 38 + Math.random() * 24;
+      return executeShot(s, carrier.id, cpuAimX2, cpuAimY2);
     }
 
     const roll = Math.random();
@@ -589,7 +609,15 @@ function canCpuShoot(s, carrier) {
 }
 
 function cpuPass(s, carrier, type) {
-  const teammates = s.players.filter(p => p.team === 'away' && p.id !== carrier.id);
+  var teammates = s.players.filter(function(p) {
+    if (p.team !== 'away') return false;
+    if (p.id === carrier.id) return false;
+    if (p.id === s.ball.lastCarrierId) return false;
+    return true;
+  });
+  if (teammates.length === 0) {
+    teammates = s.players.filter(function(p) { return p.team === 'away' && p.id !== carrier.id; });
+  }
   if (teammates.length === 0) return s;
 
   let target;
@@ -620,10 +648,11 @@ function cpuPass(s, carrier, type) {
 
   carrier.hasBall = false;
   carrier.burstTarget = null;
+  s.ball.lastCarrierId = carrier.id;
   s.ball.carrier = null;
   s.passIdCounter = (s.passIdCounter || 0) + 1;
 
-  const isErrant = Math.random() < CPU_PASS_ERROR_CHANCE;
+  var isErrant = Math.random() < CPU_PASS_ERROR_CHANCE;
   if (isErrant) {
     const angle = Math.random() * Math.PI * 2;
     const errDist = 2 + Math.random();
@@ -652,57 +681,85 @@ function cpuPass(s, carrier, type) {
   return s;
 }
 
-function executeShot(state, carrierId) {
+function executeShot(state, carrierId, aimX, aimY) {
   if (!carrierId) return state;
-  const s = { ...state, players: state.players.map(p => ({ ...p })) };
+  var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
   s.ball = { ...s.ball };
 
-  const carrier = s.players.find(p => p.id === carrierId);
+  var carrier = s.players.find(function(p) { return p.id === carrierId; });
   if (!carrier) return state;
 
-  const shootingTeam = carrier.team;
-  const goalX = getAttackGoalX(shootingTeam, s.clock.half);
-  const distToGoal = Math.abs(goalX - carrier.x);
+  var shootingTeam = carrier.team;
+  var goalX = getAttackGoalX(shootingTeam, s.clock.half);
+  var distToGoal = Math.abs(goalX - carrier.x);
 
   if (distToGoal > SHOOT_RANGE_X) return state;
 
+  // Clamp aimY to goal mouth range (38-62)
+  var clampedAimY = Math.max(38, Math.min(62, aimY != null ? aimY : 50));
+
+  // Apply scatter based on distance
+  var scatterRange = Math.max(0, (distToGoal - 5) * 0.5);
+  var targetY = clampedAimY + (Math.random() - 0.5) * scatterRange;
+
   // Distance factor: 50% at 5 units, 5% at 25 units
-  let distFactor;
+  var distFactor;
   if (distToGoal <= 5) distFactor = 0.50;
   else if (distToGoal >= 25) distFactor = 0.05;
   else distFactor = 0.50 - 0.45 * (distToGoal - 5) / 20;
 
-  // Angle factor: 1.0 at center (y=50), 0.5 at edges
-  const angleFactor = 1.0 - 0.5 * (Math.abs(carrier.y - 50) / 50);
+  // Aim factor: shots aimed at corners are harder to save but more likely to go wide
+  // Shots aimed at center are easier for keeper but less likely to miss
+  var aimOffCenter = Math.abs(clampedAimY - 50) / 12; // 0 at center, ~1 at posts
+  var cornerSaveBonus = aimOffCenter * 0.25; // corners reduce save chance
+  var cornerWideBonus = aimOffCenter * 0.15; // corners increase wide chance
+
+  // Keeper position factor: if aiming away from keeper, save chance drops
+  var keeperId = shootingTeam === 'home' ? 'away_0' : 'home_0';
+  var keeper = s.players.find(function(p) { return p.id === keeperId; });
+  var keeperFactor = 1.0;
+  if (keeper) {
+    var keeperDist = Math.abs(keeper.y - clampedAimY);
+    // Closer to keeper = higher save chance, further = lower
+    keeperFactor = Math.max(0.4, 1.0 - keeperDist * 0.02);
+  }
 
   // Defender factor
-  let defFactor = 1.0;
-  for (const p of s.players) {
+  var defFactor = 1.0;
+  for (var i = 0; i < s.players.length; i++) {
+    var p = s.players[i];
     if (p.team === shootingTeam || p.role === 'GK') continue;
     if (getDist(p.x, p.y, carrier.x, carrier.y) < 3) { defFactor = 0.7; break; }
   }
 
-  const shotChance = distFactor * angleFactor * defFactor;
-  const roll = Math.random();
-  const wideChance = (1 - shotChance) / 14;
+  // Angle factor: 1.0 at center (y=50), 0.5 at edges
+  var angleFactor = 1.0 - 0.5 * (Math.abs(carrier.y - 50) / 50);
 
-  let result;
-  if (roll < shotChance) result = 'goal';
+  var baseChance = distFactor * angleFactor * defFactor;
+  var saveChance = (1 - baseChance) * (1 - cornerSaveBonus) * keeperFactor;
+  var wideChance = (1 - baseChance) * cornerWideBonus + (1 - baseChance) / 14;
+
+  // Normalize: goal chance, then save, then wide
+  var goalChance = baseChance;
+  var roll = Math.random();
+
+  var result;
+  if (roll < goalChance) result = 'goal';
   else if (roll < 1 - wideChance) result = 'save';
   else result = 'wide';
 
-  let targetY;
-  if (result === 'goal') targetY = 44 + Math.random() * 12;
-  else if (result === 'save') targetY = Math.max(38, Math.min(62, carrier.y + (Math.random() - 0.5) * 8));
-  else targetY = carrier.y > 50 ? 65 + Math.random() * 10 : 35 - Math.random() * 10;
+  // Adjust targetY based on result
+  if (result === 'wide') {
+    targetY = clampedAimY > 50 ? 65 + Math.random() * 10 : 35 - Math.random() * 10;
+  }
 
   carrier.hasBall = false;
   s.ball.carrier = null;
   s.passBall = null;
   s.shot = {
-    result, shootingTeam,
+    result: result, shootingTeam: shootingTeam,
     fromX: carrier.x, fromY: carrier.y,
-    targetX: goalX, targetY,
+    targetX: goalX, targetY: targetY,
     ticksTotal: SHOT_ANIM_TICKS, ticksElapsed: 0,
   };
   s.phase = 'shot';
@@ -995,12 +1052,14 @@ function App() {
   stateRef.current = gameState;
 
   // Calculate field dimensions
-  const calcDims = useCallback(() => {
-    const pad = 16;
-    const maxW = window.innerWidth - pad * 2;
-    const maxH = window.innerHeight - 60 - pad * 2; // leave room for HUD
-    let w = maxW;
-    let h = w / 1.5;
+  const calcDims = useCallback(function() {
+    var pad = 8;
+    var vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+    var vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    var maxW = vw - pad * 2;
+    var maxH = vh - 44 - pad * 2; // leave room for HUD
+    var w = maxW;
+    var h = w / 1.5;
     if (h > maxH) { h = maxH; w = h * 1.5; }
     pixelsPerUnitRef.current = w / 100;
     setFieldDims({ width: w, height: h });
@@ -1057,7 +1116,7 @@ function App() {
       const inRange = carrier && Math.abs(hGoalX - carrier.x) <= SHOOT_RANGE_X;
       const isGoalTap = hGoalX === 100 ? gx >= 85 : gx <= 15;
       if (inRange && isGoalTap) {
-        dispatch({ type: 'SHOOT' });
+        dispatch({ type: 'SHOOT', aimX: gx, aimY: gy });
         return;
       }
 
@@ -1108,7 +1167,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 1.0.1 test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 1.1 test build'),
         React.createElement('button', {
           onClick: () => dispatch({ type: 'START_GAME' })
         }, 'KICK OFF')
@@ -1139,8 +1198,8 @@ function App() {
         ),
         // Sandbox Mode
         React.createElement('div', { className: 'landing-card mode-card' },
-          React.createElement('h3', null, 'Sandbox Mode'),
-          React.createElement('p', null, 'Manual placement of all players for instruction purposes. Run the game from that point to show the importance of positioning and setting up plays. For coaches and players learning the game.')
+          React.createElement('h3', null, 'Coaching Sandbox'),
+          React.createElement('p', null, 'Drag players into any formation. Use it as a digital whiteboard to show positioning, or hit play and run the game from that setup -- single player against the CPU or two-player. Show your players where to be, then show them why.')
         ),
         // Personality powers
         React.createElement('p', { className: 'landing-text' },
@@ -1157,7 +1216,8 @@ function App() {
           React.createElement('p', { className: 'landing-caption' }, 'Other testing alphas in the same project:'),
           React.createElement('div', { className: 'alpha-links' },
             React.createElement('a', { href: 'https://kpurdddy.github.io/soccermommas/', target: '_blank', rel: 'noopener noreferrer' }, 'Soccer Mamas'),
-            React.createElement('a', { href: 'https://kpurdddy.github.io/Hailmarys/', target: '_blank', rel: 'noopener noreferrer' }, 'Hail Marys (tactical football)')
+            React.createElement('a', { href: 'https://kpurdddy.github.io/Hailmarys/', target: '_blank', rel: 'noopener noreferrer' }, 'Hail Marys (tactical football)'),
+            React.createElement('a', { href: 'https://kpurdddy.github.io/TacFootball/', target: '_blank', rel: 'noopener noreferrer' }, 'TacFootball (tactical football -- earlier build)')
           )
         ),
         // Experimental note
@@ -1353,7 +1413,7 @@ function App() {
     ),
 
     // Version text
-    React.createElement('div', { className: 'version-text' }, 'Soccer Mamas -- Alpha 1.0.1')
+    React.createElement('div', { className: 'version-text' }, 'Soccer Mamas -- Alpha 1.1')
   );
 }
 
