@@ -13,7 +13,7 @@ html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe
 
 .title-screen {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  min-height: 50vh; color: white; text-align: center; padding: 20px;
+  min-height: 70vh; color: white; text-align: center; padding: 20px;
 }
 .title-screen h1 { font-size: 3.5em; margin-bottom: 20px; letter-spacing: 2px; }
 .title-screen .subtitle { font-size: 1.3em; margin-bottom: 12px; color: #ccc; }
@@ -51,8 +51,8 @@ html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe
 }
 .feedback-card { text-align: center; }
 .feedback-btn {
-  display: inline-block; margin-top: 12px; padding: 10px 28px;
-  background: #27ae60; color: white; font-size: 1.0em; font-weight: bold;
+  display: inline-block; margin-top: 12px; padding: 14px 40px;
+  background: #27ae60; color: white; font-size: 1.2em; font-weight: bold;
   border-radius: 8px; text-decoration: none; transition: background 0.2s;
 }
 .feedback-btn:hover { background: #2ecc71; }
@@ -187,8 +187,6 @@ function createInitialState() {
     cpuThreatDetectedTick: null,
     cpuNextStrategyTick: 0,
     oobTimer: 0,
-    saveDisplayTimer: 0,
-    selectedDefender: null,
   };
 }
 
@@ -201,8 +199,6 @@ function updateGame(state, action) {
     case 'TAP_FIELD': return tapField(state, action.x, action.y);
     case 'SHOOT': return executeShot(state, state.ball.carrier, action.aimX, action.aimY);
     case 'TAP_DEFENDER': return tapDefender(state, action.playerId);
-    case 'SELECT_DEFENDER': return selectDefender(state, action.playerId);
-    case 'POSITION_DEFENDER': return positionDefender(state, action.x, action.y);
     case 'START_SECOND_HALF': return startSecondHalf(state);
     case 'PLAY_AGAIN': return createInitialState();
     default: return state;
@@ -231,14 +227,6 @@ function gameTick(state) {
       return { ...s, phase: 'kickoff_pause', kickoffTimer: s.tick + KICKOFF_PAUSE_TICKS };
     }
     return s;
-  }
-
-  if (state.phase === 'save_display') {
-    var s2 = { ...state, tick: state.tick + 1 };
-    if (s2.tick >= s2.saveDisplayTimer) {
-      return { ...s2, phase: 'play', clock: { ...s2.clock, running: true } };
-    }
-    return s2;
   }
 
   if (state.phase === 'shot') {
@@ -342,14 +330,16 @@ function updatePassBall(s) {
   const opposingTeam = pb.fromTeam === 'home' ? 'away' : 'home';
   if (!pb.checkedBy) pb.checkedBy = new Set();
 
-  for (var i = 0; i < s.players.length; i++) {
-    var p = s.players[i];
+  for (const p of s.players) {
     if (p.team !== opposingTeam) continue;
+    if (pb.checkedBy.has(p.id)) continue;
+    const pDist = getDist(p.x, p.y, pb.x, pb.y);
+    if (pDist > 3) continue;
 
-    var pDist = getDist(p.x, p.y, pb.x, pb.y);
+    pb.checkedBy.add(p.id);
 
-    // 1. Hard collision: ALWAYS evaluate first, even if previously checked
-    if (pDist <= 2.0) {
+    // Hard collision: if ball is within inner radius, automatic interception
+    if (pDist <= 1.0) {
       p.hasBall = true;
       p.settlingUntil = s.tick + SETTLING_TICKS;
       s.ball.carrier = p.id;
@@ -358,20 +348,13 @@ function updatePassBall(s) {
       s.ball.loose = false;
       s.possession = p.team;
       s.passBall = null;
-      s.selectedDefender = null;
       s.cpuThreatDetectedTick = null;
       s.cpuNextStrategyTick = s.tick + 30;
       return s;
     }
 
-    // 2. Out of range -- skip
-    if (pDist > 3) continue;
-
-    // 3. Probabilistic check: only evaluate once per pass
-    if (pb.checkedBy.has(p.id)) continue;
-    pb.checkedBy.add(p.id);
-
     if (Math.random() < getInterceptionChance(pDist)) {
+      // Intercepted!
       p.hasBall = true;
       p.settlingUntil = s.tick + SETTLING_TICKS;
       s.ball.carrier = p.id;
@@ -380,7 +363,6 @@ function updatePassBall(s) {
       s.ball.loose = false;
       s.possession = p.team;
       s.passBall = null;
-      s.selectedDefender = null;
       s.cpuThreatDetectedTick = null;
       s.cpuNextStrategyTick = s.tick + 30;
       return s;
@@ -509,36 +491,16 @@ function checkTackles(s) {
   const opposingTeam = carrier.team === 'home' ? 'away' : 'home';
   for (const p of s.players) {
     if (p.team !== opposingTeam) continue;
-    if (p.cooldownUntil > s.tick) continue;
     const d = getDist(p.x, p.y, carrier.x, carrier.y);
     if (d > 3) continue;
     if (Math.random() < getTackleChance(d)) {
-      // Tackle successful -- ball goes directly to tackler
       carrier.hasBall = false;
       carrier.burstTarget = null;
       carrier.cooldownUntil = s.tick + DISPOSSESSION_COOLDOWN_TICKS;
-
-      p.hasBall = true;
-      p.settlingUntil = s.tick + SETTLING_TICKS;
-      s.ball.carrier = p.id;
-      s.ball.x = p.x;
-      s.ball.y = p.y;
-      s.ball.loose = false;
+      s.ball.carrier = null;
+      s.ball.loose = true;
+      s.ball.looseTimer = s.tick + LOOSE_BALL_TICKS;
       s.ball.lastCarrierId = carrier.id;
-      s.possession = p.team;
-      s.selectedDefender = null;
-      s.cpuThreatDetectedTick = null;
-      s.cpuNextStrategyTick = s.tick + 30;
-
-      // Auto-burst: winning player moves away from contact
-      var dx = p.x - carrier.x;
-      var dy = p.y - carrier.y;
-      var awayDist = Math.sqrt(dx * dx + dy * dy) || 1;
-      p.burstTarget = {
-        x: Math.max(1, Math.min(99, p.x + (dx / awayDist) * 5)),
-        y: Math.max(1, Math.min(99, p.y + (dy / awayDist) * 5))
-      };
-
       return s;
     }
   }
@@ -569,7 +531,6 @@ function updateLooseBall(s) {
     s.ball.loose = false;
     s.ball.lastCarrierId = null;
     s.possession = nearestPlayer.team;
-    s.selectedDefender = null;
     s.cpuThreatDetectedTick = null;
     s.cpuNextStrategyTick = s.tick + 30;
   }
@@ -832,14 +793,13 @@ function updateShotAnimation(state) {
       s.goalTimer = s.tick + GOAL_CELEBRATION_TICKS;
       s.shot = null;
     } else if (s.shot.result === 'save') {
-      var reboundX = s.shot.targetX < 50 ? 10 : 90;
+      const reboundX = s.shot.targetX < 50 ? 10 : 90;
       s.ball.x = reboundX;
       s.ball.y = 40 + Math.random() * 20;
       s.ball.loose = true;
       s.ball.looseTimer = s.tick + LOOSE_BALL_TICKS;
       s.ball.lastCarrierId = null;
-      s.phase = 'save_display';
-      s.saveDisplayTimer = s.tick + 30;
+      s.phase = 'play';
       s.shot = null;
     } else {
       // Wide — goal kick
@@ -903,7 +863,6 @@ function resetForKickoff(s) {
     possession: concededTeam,
     passBall: null, shot: null,
     cpuThreatDetectedTick: null, cpuNextStrategyTick: 0,
-    selectedDefender: null,
   };
 }
 
@@ -940,7 +899,6 @@ function startSecondHalf(state) {
     passBall: null, shot: null,
     cpuThreatDetectedTick: null, cpuNextStrategyTick: 0,
     phase: 'kickoff_pause', kickoffTimer: state.tick + KICKOFF_PAUSE_TICKS,
-    selectedDefender: null,
   };
 }
 
@@ -968,7 +926,6 @@ function checkOutOfBounds(s) {
     }
     s.ball.x = bx; s.ball.y = by; s.ball.loose = false;
     s.possession = otherTeam; s.passBall = null;
-    s.selectedDefender = null;
     s.phase = 'oob_pause'; s.oobTimer = s.tick + OOB_PAUSE_TICKS;
     s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
     return s;
@@ -1005,7 +962,6 @@ function checkOutOfBounds(s) {
       s.possession = atkTeam;
       if (nearest) { nearest.hasBall = true; nearest.settlingUntil = s.tick + SETTLING_TICKS; s.ball.carrier = nearest.id; }
     }
-    s.selectedDefender = null;
     s.phase = 'oob_pause'; s.oobTimer = s.tick + OOB_PAUSE_TICKS;
     s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
     return s;
@@ -1028,38 +984,6 @@ function tapDefender(state, playerId) {
   const s = { ...state, players: state.players.map(p => ({ ...p })) };
   const d = s.players.find(p => p.id === defender.id);
   d.burstTarget = { x: carrier.x, y: carrier.y };
-  s.selectedDefender = null;
-  return s;
-}
-
-function selectDefender(state, playerId) {
-  if (state.phase !== 'play') return state;
-  if (state.possession !== 'away') return state;
-
-  var defender = state.players.find(function(p) { return p.id === playerId; });
-  if (!defender || defender.team !== 'home') return state;
-
-  // If tapping the already-selected defender, deselect
-  if (state.selectedDefender === playerId) {
-    return { ...state, selectedDefender: null };
-  }
-
-  return { ...state, selectedDefender: playerId };
-}
-
-function positionDefender(state, x, y) {
-  if (state.phase !== 'play') return state;
-  if (state.possession !== 'away') return state;
-  if (!state.selectedDefender) return state;
-
-  var defender = state.players.find(function(p) { return p.id === state.selectedDefender; });
-  if (!defender || defender.team !== 'home') return { ...state, selectedDefender: null };
-  if (defender.burstCooldownUntil > state.tick) return { ...state, selectedDefender: null };
-
-  var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
-  var d = s.players.find(function(p) { return p.id === state.selectedDefender; });
-  d.burstTarget = { x: x, y: y };
-  s.selectedDefender = null;
   return s;
 }
 
@@ -1128,22 +1052,15 @@ function App() {
   stateRef.current = gameState;
 
   // Calculate field dimensions
-  var calcDims = useCallback(function() {
+  const calcDims = useCallback(function() {
     var pad = 8;
     var vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
     var vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-
     var maxW = vw - pad * 2;
-    var maxH = vh - 44 - pad * 2;
-
-    // Unlock aspect ratio: use all available space
+    var maxH = vh - 44 - pad * 2; // leave room for HUD
     var w = maxW;
-    var h = maxH;
-
-    // Clamp ratio between 1.4:1 and 2.4:1
-    if (w / h < 1.4) h = w / 1.4;
-    if (w / h > 2.4) w = h * 2.4;
-
+    var h = w / 1.5;
+    if (h > maxH) { h = maxH; w = h * 1.5; }
     pixelsPerUnitRef.current = w / 100;
     setFieldDims({ width: w, height: h });
   }, []);
@@ -1223,42 +1140,21 @@ function App() {
         dispatch({ type: 'TAP_FIELD', x: gx, y: gy });
       }
     } else if (state.possession === 'away') {
-      // Check if tap is on a home player
-      var tappedPlayer2 = null;
-      var minDist2 = Infinity;
-      for (var j = 0; j < state.players.length; j++) {
-        var p2 = state.players[j];
-        if (p2.team !== 'home') continue;
-        var ppx2 = p2.x * ppu;
-        var ppy2 = p2.y * (fieldDims.height / 100);
-        var dist2 = Math.sqrt((px - ppx2) * (px - ppx2) + (py - ppy2) * (py - ppy2));
-        if (dist2 < tapRadius && dist2 < minDist2) {
-          minDist2 = dist2;
-          tappedPlayer2 = p2;
+      // Tap home player to commit defender
+      let tappedPlayer = null;
+      let minDist = Infinity;
+      for (const p of state.players) {
+        if (p.team !== 'home') continue;
+        const ppx = p.x * ppu;
+        const ppy = p.y * (fieldDims.height / 100);
+        const dist = Math.sqrt((px - ppx) ** 2 + (py - ppy) ** 2);
+        if (dist < tapRadius && dist < minDist) {
+          minDist = dist;
+          tappedPlayer = p;
         }
       }
-
-      if (state.selectedDefender) {
-        // A defender is already selected
-        if (tappedPlayer2) {
-          // Tapped another player
-          var carrier2 = state.players.find(function(p) { return p.id === state.ball.carrier; });
-          if (carrier2 && tappedPlayer2.id === carrier2.id) {
-            // Tapped the ball carrier -- commit tackle
-            dispatch({ type: 'TAP_DEFENDER', playerId: state.selectedDefender });
-          } else if (tappedPlayer2.team === 'home') {
-            // Tapped a different home player -- switch selection
-            dispatch({ type: 'SELECT_DEFENDER', playerId: tappedPlayer2.id });
-          }
-        } else {
-          // Tapped empty field -- position the selected defender there
-          dispatch({ type: 'POSITION_DEFENDER', x: gx, y: gy });
-        }
-      } else {
-        // No defender selected yet
-        if (tappedPlayer2 && tappedPlayer2.team === 'home') {
-          dispatch({ type: 'SELECT_DEFENDER', playerId: tappedPlayer2.id });
-        }
+      if (tappedPlayer) {
+        dispatch({ type: 'TAP_DEFENDER', playerId: tappedPlayer.id });
       }
     }
   }, [dispatch, fieldDims]);
@@ -1271,7 +1167,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 1.2.0 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 1.1 test build'),
         React.createElement('button', {
           onClick: () => dispatch({ type: 'START_GAME' })
         }, 'KICK OFF')
@@ -1360,10 +1256,7 @@ function App() {
       React.createElement('span', { className: 'score' },
         gameState.score.home + ' \u2014 ' + gameState.score.away
       ),
-      React.createElement('span', { className: 'clock' }, clockStr),
-      React.createElement('span', {
-        style: { color: 'rgba(255,255,255,0.6)', fontSize: '0.7em' }
-      }, 'Alpha 1.2.0 -- test build')
+      React.createElement('span', { className: 'clock' }, clockStr)
     ),
 
     // PITCH (wrapped in div for overlay positioning)
@@ -1424,21 +1317,6 @@ function App() {
           });
         })(),
 
-        // Selected defender ring
-        gameState.selectedDefender ? (function() {
-          var sd = gameState.players.find(function(p) { return p.id === gameState.selectedDefender; });
-          if (!sd) return null;
-          return React.createElement('circle', {
-            key: 'selected-defender-ring',
-            cx: sd.x * ppu, cy: sd.y * ypu,
-            r: Math.max(20, ppu * 2.5),
-            fill: 'none', stroke: '#00ff88',
-            strokeWidth: 3,
-            opacity: 0.7 + 0.3 * Math.sin(gameState.tick * 0.3),
-            strokeDasharray: '6 3',
-          });
-        })() : null,
-
         // Loose ball indicator
         gameState.ball.loose ? React.createElement('circle', {
           key: 'loose-ring',
@@ -1465,22 +1343,6 @@ function App() {
           letterSpacing: '8px', fontFamily: 'Arial, sans-serif',
         }
       }, 'GOAL!')) : null,
-
-      // SAVE overlay
-      gameState.phase === 'save_display' ? React.createElement('div', {
-        key: 'save-overlay',
-        style: {
-          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none',
-        }
-      }, React.createElement('div', {
-        style: {
-          fontSize: Math.max(36, fw * 0.08) + 'px', fontWeight: 'bold',
-          color: 'white', textShadow: '0 0 15px rgba(255,255,255,0.6), 0 4px 8px rgba(0,0,0,0.5)',
-          letterSpacing: '6px', fontFamily: 'Arial, sans-serif',
-        }
-      }, 'SAVE!')) : null,
 
       // Kickoff pause overlay
       gameState.phase === 'kickoff_pause' ? React.createElement('div', {
@@ -1550,6 +1412,8 @@ function App() {
       ) : null,
     ),
 
+    // Version text
+    React.createElement('div', { className: 'version-text' }, 'Soccer Mamas -- Alpha 1.1')
   );
 }
 
