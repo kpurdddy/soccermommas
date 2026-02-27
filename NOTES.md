@@ -1,5 +1,11 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 1.2.1 (2026-02-27)
+- Prominent version HUD: "Alpha 1.2.1 -- test build" now centered, bold, white, 1.2em on its own top row; score/clock/half on second row below
+- HUD height allowance increased from 44px to 64px for two-row layout
+- Save animation fix: ball now targets keeper position instead of goal line on saves, so ball visibly stops at keeper rather than crossing the goal line
+- Title screen version updated to Alpha 1.2.1
+
 ## Alpha 1.2.0 (2026-02-26)
 - Ghost ball fix: interception loop reordered so hard collision (now 2.0 units) evaluates BEFORE checkedBy gate -- balls can no longer skip through defenders
 - Viewport dynamic sizing: aspect ratio unlocked, clamped between 1.4:1 and 2.4:1 -- fills wide phones and tablets properly

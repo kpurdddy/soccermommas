@@ -792,16 +792,6 @@ function executeShot(state, carrierId, aimX, aimY) {
     targetY = clampedAimY > 50 ? 65 + Math.random() * 10 : 35 - Math.random() * 10;
   }
 
-  // If save: redirect ball target to keeper position so ball visibly stops at keeper
-  if (result === 'save') {
-    var saveKeeperId = shootingTeam === 'home' ? 'away_0' : 'home_0';
-    var saveKeeper = s.players.find(function(p) { return p.id === saveKeeperId; });
-    if (saveKeeper) {
-      targetX = saveKeeper.x;
-      targetY = saveKeeper.y;
-    }
-  }
-
   carrier.hasBall = false;
   s.ball.carrier = null;
   s.passBall = null;
@@ -1144,7 +1134,7 @@ function App() {
     var vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 
     var maxW = vw - pad * 2;
-    var maxH = vh - 64 - pad * 2;
+    var maxH = vh - 44 - pad * 2;
 
     // Unlock aspect ratio: use all available space
     var w = maxW;
@@ -1281,7 +1271,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 1.2.1 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 1.2.0 -- test build'),
         React.createElement('button', {
           onClick: () => dispatch({ type: 'START_GAME' })
         }, 'KICK OFF')
@@ -1364,18 +1354,16 @@ function App() {
 
   return React.createElement('div', { className: 'game-container', ref: containerRef },
     // HUD
-    React.createElement('div', { style: { width: '100%', maxWidth: fw, textAlign: 'center' } },
-      React.createElement('div', {
-        style: { color: 'white', fontSize: '1.2em', fontWeight: 'bold', padding: '4px 0 2px', letterSpacing: '1px' }
-      }, 'Alpha 1.2.1 -- test build'),
-      React.createElement('div', { className: 'hud', style: { maxWidth: fw } },
-        React.createElement('span', { className: 'half' },
-          (gameState.possession === 'home' ? '\u{1F7E6} ' : '\u{1F7E5} ') + halfStr),
-        React.createElement('span', { className: 'score' },
-          gameState.score.home + ' \u2014 ' + gameState.score.away
-        ),
-        React.createElement('span', { className: 'clock' }, clockStr)
-      )
+    React.createElement('div', { className: 'hud', style: { maxWidth: fw } },
+      React.createElement('span', { className: 'half' },
+        (gameState.possession === 'home' ? '\u{1F7E6} ' : '\u{1F7E5} ') + halfStr),
+      React.createElement('span', { className: 'score' },
+        gameState.score.home + ' \u2014 ' + gameState.score.away
+      ),
+      React.createElement('span', { className: 'clock' }, clockStr),
+      React.createElement('span', {
+        style: { color: 'rgba(255,255,255,0.6)', fontSize: '0.7em' }
+      }, 'Alpha 1.2.0 -- test build')
     ),
 
     // PITCH (wrapped in div for overlay positioning)
