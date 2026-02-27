@@ -1,0 +1,1491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Soccer Mamas</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe UI', Arial, sans-serif; }
+#root { min-height: 100%; }
+
+.title-screen {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 70vh; color: white; text-align: center; padding: 20px;
+}
+.title-screen h1 { font-size: 3.5em; margin-bottom: 20px; letter-spacing: 2px; }
+.title-screen .subtitle { font-size: 1.3em; margin-bottom: 12px; color: #ccc; }
+.title-screen .version { font-size: 0.85em; color: #888; margin-bottom: 40px; }
+.title-screen button {
+  font-size: 1.4em; padding: 14px 48px; background: #27ae60; color: white;
+  border: none; border-radius: 8px; cursor: pointer; font-weight: bold;
+  letter-spacing: 1px; transition: background 0.2s;
+}
+.title-screen button:hover { background: #2ecc71; }
+
+.game-container {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100vh; width: 100%; padding: 8px; touch-action: none; overflow: hidden;
+}
+.hud {
+  display: flex; justify-content: space-between; align-items: center;
+  width: 100%; max-width: 100%; padding: 4px 12px; color: white; font-size: 1.1em;
+}
+.hud .score { font-weight: bold; font-size: 1.3em; }
+.hud .clock { color: #aaa; font-variant-numeric: tabular-nums; }
+.hud .half { color: #aaa; font-size: 0.9em; }
+.version-text {
+  position: fixed; bottom: 4px; right: 8px; color: rgba(255,255,255,0.3);
+  font-size: 0.7em; pointer-events: none;
+}
+.landing-wrapper { width: 100%; }
+.landing-content {
+  max-width: 700px; margin: 0 auto; padding: 20px 24px 60px;
+  color: #ccc; font-size: 1em; line-height: 1.6;
+}
+.landing-card {
+  background: rgba(255,255,255,0.06); border-radius: 8px;
+  padding: 20px; margin-bottom: 20px;
+}
+.feedback-card { text-align: center; }
+.feedback-btn {
+  display: inline-block; margin-top: 12px; padding: 14px 40px;
+  background: #27ae60; color: white; font-size: 1.2em; font-weight: bold;
+  border-radius: 8px; text-decoration: none; transition: background 0.2s;
+}
+.feedback-btn:hover { background: #2ecc71; }
+.landing-heading { color: white; font-size: 1.6em; margin: 32px 0 16px; }
+.landing-text { margin-bottom: 20px; }
+.landing-text strong { color: white; }
+.highlight { color: #2ecc71; font-weight: bold; }
+.mode-card { border-left: 4px solid #27ae60; }
+.mode-card h3 { color: white; margin-bottom: 8px; font-size: 1.2em; }
+.mode-card p { color: #ccc; }
+.landscape-note { font-size: 0.85em; color: #888; text-align: center; margin: 20px 0; }
+.landing-caption { color: #aaa; margin-bottom: 8px; }
+.alpha-links { display: flex; flex-direction: column; gap: 8px; }
+.alpha-links a { color: #2ecc71; text-decoration: none; }
+.alpha-links a:hover { text-decoration: underline; }
+.landing-divider { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 32px 0 20px; }
+.experimental-note { color: #777; font-style: italic; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+'use strict';
+
+// ==================== GAME CONSTANTS ====================
+const TICK_MS = 33; // ~30fps
+const DRIFT_SPEED = 0.15;
+const BURST_SPEED = 0.45;
+const PASS_SPEED = 0.75;
+const SETTLING_TICKS = 15; // 500ms at 30fps
+const BURST_COOLDOWN_TICKS = 60; // 2000ms
+const DISPOSSESSION_COOLDOWN_TICKS = 45; // 1500ms
+const HOME_PULL = 0.02;
+const ARRIVAL_DIST = 2;
+const GK_HOME_X_MIN = 2;
+const GK_HOME_X_MAX = 8;
+const GK_AWAY_X_MIN = 92;
+const GK_AWAY_X_MAX = 98;
+const LOOSE_BALL_TICKS = 10; // 300ms
+const SHOOT_RANGE_X = 25;
+const GOAL_CELEBRATION_TICKS = 45; // 1.5s
+const KICKOFF_PAUSE_TICKS = 30; // 1s
+const CPU_STRATEGY_INTERVAL = 60; // ~2 seconds
+const CPU_REACTION_DELAY_TICKS = 9; // 300ms
+const CPU_PASS_ERROR_CHANCE = 0.15;
+const SHOT_ANIM_TICKS = 20;
+const HALF_REAL_S = 180; // 3 real minutes per half
+const GAME_TIME_SCALE = 15; // 1 real second = 15 game seconds
+const OOB_PAUSE_TICKS = 15; // 0.5s
+
+function getDist(x1, y1, x2, y2) {
+  return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2);
+}
+
+function getInterceptionChance(d) {
+  if (d > 3) return 0;
+  if (d <= 0.5) return 0.70;
+  if (d <= 1) return 0.40;
+  if (d <= 2) return 0.15;
+  return 0.05;
+}
+
+function getTackleChance(d) {
+  if (d > 3) return 0;
+  if (d <= 0.5) return 0.80;
+  if (d <= 1) return 0.50;
+  if (d <= 2) return 0.25;
+  return 0.10;
+}
+
+function getAttackGoalX(team, half) {
+  if (half === 1) return team === 'home' ? 100 : 0;
+  return team === 'home' ? 0 : 100;
+}
+
+// ==================== FORMATIONS ====================
+const HOME_FORMATION = [
+  { role: 'GK', x: 5, y: 50 },
+  { role: 'LB', x: 20, y: 15 }, { role: 'CB', x: 20, y: 38 },
+  { role: 'CB', x: 20, y: 62 }, { role: 'RB', x: 20, y: 85 },
+  { role: 'LM', x: 45, y: 15 }, { role: 'CM', x: 45, y: 38 },
+  { role: 'CM', x: 45, y: 62 }, { role: 'RM', x: 45, y: 85 },
+  { role: 'ST', x: 70, y: 35 }, { role: 'ST', x: 70, y: 65 },
+];
+
+const AWAY_FORMATION = [
+  { role: 'GK', x: 95, y: 50 },
+  { role: 'LB', x: 80, y: 85 }, { role: 'CB', x: 80, y: 62 },
+  { role: 'CB', x: 80, y: 38 }, { role: 'RB', x: 80, y: 15 },
+  { role: 'LM', x: 55, y: 85 }, { role: 'CM', x: 55, y: 62 },
+  { role: 'CM', x: 55, y: 38 }, { role: 'RM', x: 55, y: 15 },
+  { role: 'ST', x: 30, y: 65 }, { role: 'ST', x: 30, y: 35 },
+];
+
+// ==================== INITIAL STATE ====================
+function createInitialState() {
+  const players = [];
+  HOME_FORMATION.forEach((f, i) => {
+    players.push({
+      id: 'home_' + i, team: 'home', role: f.role,
+      x: f.x, y: f.y, homeX: f.x, homeY: f.y,
+      vx: 0, vy: 0, hasBall: i === 9, // first ST starts with ball
+      burstTarget: null, burstCooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+    });
+  });
+  AWAY_FORMATION.forEach((f, i) => {
+    players.push({
+      id: 'away_' + i, team: 'away', role: f.role,
+      x: f.x, y: f.y, homeX: f.x, homeY: f.y,
+      vx: 0, vy: 0, hasBall: false,
+      burstTarget: null, burstCooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+    });
+  });
+
+  return {
+    ball: { x: 70, y: 35, carrier: 'home_9', loose: false, velocity: null,
+            lastCarrierId: null, looseTimer: 0 },
+    players,
+    score: { home: 0, away: 0 },
+    clock: { elapsed: 0, half: 1, running: false },
+    possession: 'home',
+    phase: 'title',
+    tick: 0,
+    passBall: null,
+    passIdCounter: 0,
+    shot: null,
+    goalTimer: 0,
+    lastGoalBy: null,
+    kickoffTimer: 0,
+    cpuThreatDetectedTick: null,
+    cpuNextStrategyTick: 0,
+    oobTimer: 0,
+  };
+}
+
+// ==================== PURE UPDATE FUNCTION ====================
+function updateGame(state, action) {
+  switch (action.type) {
+    case 'START_GAME': return startGame(state);
+    case 'TICK': return gameTick(state);
+    case 'TAP_PLAYER': return tapPlayer(state, action.playerId);
+    case 'TAP_FIELD': return tapField(state, action.x, action.y);
+    case 'SHOOT': return executeShot(state, state.ball.carrier);
+    case 'TAP_DEFENDER': return tapDefender(state, action.playerId);
+    case 'START_SECOND_HALF': return startSecondHalf(state);
+    case 'PLAY_AGAIN': return createInitialState();
+    default: return state;
+  }
+}
+
+function startGame(state) {
+  return { ...state, phase: 'kickoff_pause', kickoffTimer: state.tick + KICKOFF_PAUSE_TICKS };
+}
+
+function gameTick(state) {
+  if (state.phase === 'title' || state.phase === 'halftime' || state.phase === 'fulltime') return state;
+
+  if (state.phase === 'kickoff_pause') {
+    let s = { ...state, tick: state.tick + 1 };
+    if (s.tick >= s.kickoffTimer) {
+      return { ...s, phase: 'play', clock: { ...s.clock, running: true } };
+    }
+    return s;
+  }
+
+  if (state.phase === 'goal_celebration') {
+    let s = { ...state, tick: state.tick + 1 };
+    if (s.tick >= s.goalTimer) {
+      s = resetForKickoff(s);
+      return { ...s, phase: 'kickoff_pause', kickoffTimer: s.tick + KICKOFF_PAUSE_TICKS };
+    }
+    return s;
+  }
+
+  if (state.phase === 'shot') {
+    return updateShotAnimation(state);
+  }
+
+  if (state.phase === 'oob_pause') {
+    let s = { ...state, tick: state.tick + 1 };
+    if (s.tick >= s.oobTimer) {
+      return { ...s, phase: 'play', clock: { ...s.clock, running: true } };
+    }
+    return s;
+  }
+
+  if (state.phase !== 'play') return state;
+
+  let s = { ...state, tick: state.tick + 1, players: state.players.map(p => ({ ...p })) };
+  s.ball = { ...s.ball };
+  if (s.passBall) {
+    s.passBall = { ...s.passBall, trail: s.passBall.trail.map(t => ({ ...t })),
+      checkedBy: s.passBall.checkedBy ? new Set(s.passBall.checkedBy) : new Set() };
+  }
+
+  // Update clock
+  s.clock = { ...s.clock, elapsed: s.clock.elapsed + 1 };
+
+  // Check halftime / fulltime
+  const gameSeconds = s.clock.elapsed * TICK_MS / 1000 * GAME_TIME_SCALE;
+  if (s.clock.half === 1 && gameSeconds >= 2700) {
+    return { ...s, phase: 'halftime', clock: { ...s.clock, running: false } };
+  }
+  if (s.clock.half === 2 && gameSeconds >= 5400) {
+    return { ...s, phase: 'fulltime', clock: { ...s.clock, running: false } };
+  }
+
+  s = updatePassBall(s);
+  s = driftPlayers(s);
+  s = burstMovement(s);
+  s = checkTackles(s);
+  s = updateLooseBall(s);
+  s = cpuPossession(s);
+  s = attachBallToCarrier(s);
+  s = checkOutOfBounds(s);
+  if (s.phase !== 'play') return s;
+  s = clampPlayers(s);
+
+  return s;
+}
+
+function updatePassBall(s) {
+  if (!s.passBall) return s;
+  const pb = s.passBall;
+
+  // Determine target position
+  let targetX, targetY;
+  if (pb.toId) {
+    const target = s.players.find(p => p.id === pb.toId);
+    if (!target) { s.passBall = null; return s; }
+    targetX = target.x;
+    targetY = target.y;
+  } else if (pb.targetPos) {
+    targetX = pb.targetPos.x;
+    targetY = pb.targetPos.y;
+  } else {
+    s.passBall = null;
+    return s;
+  }
+
+  const dx = targetX - pb.x;
+  const dy = targetY - pb.y;
+  const d = Math.sqrt(dx * dx + dy * dy);
+
+  if (d < ARRIVAL_DIST) {
+    if (pb.toId) {
+      const target = s.players.find(p => p.id === pb.toId);
+      target.hasBall = true;
+      target.settlingUntil = s.tick + SETTLING_TICKS;
+      s.ball.carrier = target.id;
+      s.ball.x = target.x;
+      s.ball.y = target.y;
+      s.ball.loose = false;
+    } else {
+      // Errant pass — loose ball
+      s.ball.x = targetX;
+      s.ball.y = targetY;
+      s.ball.loose = true;
+      s.ball.looseTimer = s.tick + LOOSE_BALL_TICKS;
+      s.ball.lastCarrierId = null;
+    }
+    s.passBall = null;
+    return s;
+  }
+
+  // Move ball toward target
+  const vx = (dx / d) * PASS_SPEED;
+  const vy = (dy / d) * PASS_SPEED;
+  pb.x += vx;
+  pb.y += vy;
+
+  // Check interceptions
+  const opposingTeam = pb.fromTeam === 'home' ? 'away' : 'home';
+  if (!pb.checkedBy) pb.checkedBy = new Set();
+
+  for (const p of s.players) {
+    if (p.team !== opposingTeam) continue;
+    if (pb.checkedBy.has(p.id)) continue;
+    const pDist = getDist(p.x, p.y, pb.x, pb.y);
+    if (pDist > 3) continue;
+
+    pb.checkedBy.add(p.id);
+    if (Math.random() < getInterceptionChance(pDist)) {
+      // Intercepted!
+      p.hasBall = true;
+      p.settlingUntil = s.tick + SETTLING_TICKS;
+      s.ball.carrier = p.id;
+      s.ball.x = p.x;
+      s.ball.y = p.y;
+      s.ball.loose = false;
+      s.possession = p.team;
+      s.passBall = null;
+      s.cpuThreatDetectedTick = null;
+      s.cpuNextStrategyTick = s.tick + 30;
+      return s;
+    }
+  }
+
+  // Update trail
+  pb.trail.push({ x: pb.x, y: pb.y, opacity: 1 });
+  if (pb.trail.length > 4) pb.trail.shift();
+  pb.trail.forEach(t => { t.opacity *= 0.6; });
+
+  s.ball.x = pb.x;
+  s.ball.y = pb.y;
+  s.ball.carrier = null;
+
+  return s;
+}
+
+function driftPlayers(s) {
+  const ballX = s.ball.x;
+  const ballY = s.ball.y;
+  const half = s.clock.half;
+
+  for (const p of s.players) {
+    if (p.role === 'GK') {
+      const targetY = ballY;
+      const dy = targetY - p.y;
+      const dLen = Math.abs(dy);
+      if (dLen > 0.5) { p.y += (dy / dLen) * DRIFT_SPEED * 0.7; }
+      const hpx = p.homeX - p.x;
+      p.x += hpx * 0.05;
+      // Clamp GK based on which side of field their home is
+      if (p.homeX < 50) {
+        p.x = Math.max(GK_HOME_X_MIN, Math.min(GK_HOME_X_MAX, p.x));
+      } else {
+        p.x = Math.max(GK_AWAY_X_MIN, Math.min(GK_AWAY_X_MAX, p.x));
+      }
+      continue;
+    }
+
+    if (p.burstTarget) continue;
+
+    let driftX = 0, driftY = 0;
+    const isDefender = ['LB', 'CB', 'RB'].includes(p.role);
+    const attackDir = getAttackGoalX(p.team, half) > 50 ? 1 : -1;
+
+    if (isDefender) {
+      const toBallX = ballX - p.x;
+      const toBallY = ballY - p.y;
+      const toBallD = Math.sqrt(toBallX * toBallX + toBallY * toBallY) || 1;
+      driftX = (toBallX / toBallD) * DRIFT_SPEED * 0.3;
+      driftY = (toBallY / toBallD) * DRIFT_SPEED * 0.15;
+    } else {
+      driftX = DRIFT_SPEED * 0.4 * attackDir;
+      driftY = (Math.random() - 0.5) * DRIFT_SPEED * 0.2;
+    }
+
+    p.x += driftX;
+    p.y += driftY;
+
+    const pullX = (p.homeX - p.x) * HOME_PULL * 0.3;
+    const pullY = (p.homeY - p.y) * HOME_PULL * 0.3;
+    p.x += pullX;
+    p.y += pullY;
+
+    p.x += (Math.random() - 0.5) * 0.04;
+    p.y += (Math.random() - 0.5) * 0.04;
+  }
+
+  return s;
+}
+
+function burstMovement(s) {
+  for (const p of s.players) {
+    if (!p.burstTarget) continue;
+    const dx = p.burstTarget.x - p.x;
+    const dy = p.burstTarget.y - p.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < ARRIVAL_DIST) {
+      // Arrived — clear burst, start cooldown
+      p.burstTarget = null;
+      p.burstCooldownUntil = s.tick + BURST_COOLDOWN_TICKS;
+      continue;
+    }
+
+    p.x += (dx / dist) * BURST_SPEED;
+    p.y += (dy / dist) * BURST_SPEED;
+  }
+  return s;
+}
+
+function attachBallToCarrier(s) {
+  if (s.ball.carrier && !s.passBall) {
+    const carrier = s.players.find(p => p.id === s.ball.carrier);
+    if (carrier) {
+      if (carrier.settlingUntil > s.tick) {
+        // Settling jitter
+        s.ball.x = carrier.x + (Math.random() - 0.5) * 0.6;
+        s.ball.y = carrier.y + (Math.random() - 0.5) * 0.6;
+      } else {
+        s.ball.x = carrier.x;
+        s.ball.y = carrier.y;
+      }
+    }
+  }
+  return s;
+}
+
+function clampPlayers(s) {
+  for (const p of s.players) {
+    if (s.ball.carrier === p.id) continue; // carrier can go OOB
+    p.x = Math.max(0.5, Math.min(99.5, p.x));
+    p.y = Math.max(0.5, Math.min(99.5, p.y));
+  }
+  return s;
+}
+
+// ==================== NEW GAME LOGIC (Prompt 2) ====================
+
+function checkTackles(s) {
+  if (!s.ball.carrier || s.ball.loose || s.passBall) return s;
+  const carrier = s.players.find(p => p.id === s.ball.carrier);
+  if (!carrier) return s;
+
+  const opposingTeam = carrier.team === 'home' ? 'away' : 'home';
+  for (const p of s.players) {
+    if (p.team !== opposingTeam) continue;
+    const d = getDist(p.x, p.y, carrier.x, carrier.y);
+    if (d > 3) continue;
+    if (Math.random() < getTackleChance(d)) {
+      carrier.hasBall = false;
+      carrier.burstTarget = null;
+      carrier.cooldownUntil = s.tick + DISPOSSESSION_COOLDOWN_TICKS;
+      s.ball.carrier = null;
+      s.ball.loose = true;
+      s.ball.looseTimer = s.tick + LOOSE_BALL_TICKS;
+      s.ball.lastCarrierId = carrier.id;
+      return s;
+    }
+  }
+  return s;
+}
+
+function updateLooseBall(s) {
+  if (!s.ball.loose) return s;
+  if (s.tick < s.ball.looseTimer) return s;
+
+  let nearestPlayer = null;
+  let nearestDist = Infinity;
+  for (const p of s.players) {
+    if (p.cooldownUntil > s.tick) continue;
+    const d = getDist(p.x, p.y, s.ball.x, s.ball.y);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearestPlayer = p;
+    }
+  }
+
+  if (nearestPlayer) {
+    nearestPlayer.hasBall = true;
+    nearestPlayer.settlingUntil = s.tick + SETTLING_TICKS;
+    s.ball.carrier = nearestPlayer.id;
+    s.ball.x = nearestPlayer.x;
+    s.ball.y = nearestPlayer.y;
+    s.ball.loose = false;
+    s.ball.lastCarrierId = null;
+    s.possession = nearestPlayer.team;
+    s.cpuThreatDetectedTick = null;
+    s.cpuNextStrategyTick = s.tick + 30;
+  }
+  return s;
+}
+
+function cpuPossession(s) {
+  if (s.possession !== 'away') return s;
+  if (!s.ball.carrier || !s.ball.carrier.startsWith('away')) return s;
+  if (s.passBall || s.ball.loose) return s;
+
+  const carrier = s.players.find(p => p.id === s.ball.carrier);
+  if (!carrier || carrier.settlingUntil > s.tick) return s;
+
+  // Check for immediate threat (home defender within 5 units)
+  const hasThreat = s.players.some(p =>
+    p.team === 'home' && getDist(p.x, p.y, carrier.x, carrier.y) < 5
+  );
+
+  if (hasThreat) {
+    if (s.cpuThreatDetectedTick == null) {
+      s.cpuThreatDetectedTick = s.tick;
+    }
+    if (s.tick - s.cpuThreatDetectedTick >= CPU_REACTION_DELAY_TICKS) {
+      s.cpuThreatDetectedTick = null;
+      // Reactive: shoot if possible, else pass
+      if (canCpuShoot(s, carrier)) {
+        return executeShot(s, carrier.id);
+      }
+      return cpuPass(s, carrier, 'reactive');
+    }
+  } else {
+    s.cpuThreatDetectedTick = null;
+  }
+
+  // Scheduled strategy (every ~60 ticks, only if no threat)
+  if (!hasThreat && s.tick >= (s.cpuNextStrategyTick || 0)) {
+    s.cpuNextStrategyTick = s.tick + CPU_STRATEGY_INTERVAL;
+
+    if (canCpuShoot(s, carrier) && Math.random() < 0.30) {
+      return executeShot(s, carrier.id);
+    }
+
+    const roll = Math.random();
+    if (roll < 0.70) {
+      return cpuPass(s, carrier, 'forward');
+    } else if (roll < 0.90) {
+      return cpuPass(s, carrier, 'safe');
+    } else {
+      if (carrier.burstCooldownUntil <= s.tick && carrier.role !== 'GK') {
+        const bdir = getAttackGoalX('away', s.clock.half) > 50 ? 1 : -1;
+        carrier.burstTarget = {
+          x: Math.max(1, Math.min(99, carrier.x + bdir * 15)),
+          y: Math.max(1, Math.min(99, carrier.y + (Math.random() - 0.5) * 10))
+        };
+      }
+      return s;
+    }
+  }
+  return s;
+}
+
+function canCpuShoot(s, carrier) {
+  const goalX = getAttackGoalX('away', s.clock.half);
+  const distToGoal = Math.abs(goalX - carrier.x);
+  if (distToGoal > SHOOT_RANGE_X) return false;
+  return !s.players.some(p =>
+    p.team === 'home' && p.role !== 'GK' &&
+    getDist(p.x, p.y, carrier.x, carrier.y) < 3 &&
+    Math.abs(goalX - p.x) < Math.abs(goalX - carrier.x)
+  );
+}
+
+function cpuPass(s, carrier, type) {
+  const teammates = s.players.filter(p => p.team === 'away' && p.id !== carrier.id);
+  if (teammates.length === 0) return s;
+
+  let target;
+  if (type === 'forward') {
+    const goalX = getAttackGoalX('away', s.clock.half);
+    const fwd = teammates.filter(p => Math.abs(goalX - p.x) < Math.abs(goalX - carrier.x));
+    const pool = fwd.length > 0 ? fwd : teammates;
+    target = pool.reduce((best, p) => {
+      const d = getDist(p.x, p.y, carrier.x, carrier.y);
+      const bd = getDist(best.x, best.y, carrier.x, carrier.y);
+      return d < bd ? p : best;
+    });
+  } else if (type === 'reactive') {
+    const sorted = teammates.slice().sort((a, b) => {
+      const gx = getAttackGoalX('away', s.clock.half);
+      const da = getDist(a.x, a.y, carrier.x, carrier.y) + (Math.abs(gx - a.x) < Math.abs(gx - carrier.x) ? -5 : 0);
+      const db = getDist(b.x, b.y, carrier.x, carrier.y) + (Math.abs(gx - b.x) < Math.abs(gx - carrier.x) ? -5 : 0);
+      return da - db;
+    });
+    target = sorted[0];
+  } else {
+    target = teammates.reduce((best, p) => {
+      const d = getDist(p.x, p.y, carrier.x, carrier.y);
+      const bd = getDist(best.x, best.y, carrier.x, carrier.y);
+      return d < bd ? p : best;
+    });
+  }
+
+  carrier.hasBall = false;
+  carrier.burstTarget = null;
+  s.ball.carrier = null;
+  s.passIdCounter = (s.passIdCounter || 0) + 1;
+
+  const isErrant = Math.random() < CPU_PASS_ERROR_CHANCE;
+  if (isErrant) {
+    const angle = Math.random() * Math.PI * 2;
+    const errDist = 2 + Math.random();
+    s.passBall = {
+      fromX: carrier.x, fromY: carrier.y,
+      toId: null,
+      targetPos: {
+        x: Math.max(1, Math.min(99, target.x + Math.cos(angle) * errDist)),
+        y: Math.max(1, Math.min(99, target.y + Math.sin(angle) * errDist)),
+      },
+      x: carrier.x, y: carrier.y,
+      trail: [], fromTeam: 'away',
+      passId: s.passIdCounter, checkedBy: new Set(),
+    };
+  } else {
+    s.passBall = {
+      fromX: carrier.x, fromY: carrier.y,
+      toId: target.id, targetPos: null,
+      x: carrier.x, y: carrier.y,
+      trail: [], fromTeam: 'away',
+      passId: s.passIdCounter, checkedBy: new Set(),
+    };
+  }
+
+  s.cpuThreatDetectedTick = null;
+  return s;
+}
+
+function executeShot(state, carrierId) {
+  if (!carrierId) return state;
+  const s = { ...state, players: state.players.map(p => ({ ...p })) };
+  s.ball = { ...s.ball };
+
+  const carrier = s.players.find(p => p.id === carrierId);
+  if (!carrier) return state;
+
+  const shootingTeam = carrier.team;
+  const goalX = getAttackGoalX(shootingTeam, s.clock.half);
+  const distToGoal = Math.abs(goalX - carrier.x);
+
+  if (distToGoal > SHOOT_RANGE_X) return state;
+
+  // Distance factor: 50% at 5 units, 5% at 25 units
+  let distFactor;
+  if (distToGoal <= 5) distFactor = 0.50;
+  else if (distToGoal >= 25) distFactor = 0.05;
+  else distFactor = 0.50 - 0.45 * (distToGoal - 5) / 20;
+
+  // Angle factor: 1.0 at center (y=50), 0.5 at edges
+  const angleFactor = 1.0 - 0.5 * (Math.abs(carrier.y - 50) / 50);
+
+  // Defender factor
+  let defFactor = 1.0;
+  for (const p of s.players) {
+    if (p.team === shootingTeam || p.role === 'GK') continue;
+    if (getDist(p.x, p.y, carrier.x, carrier.y) < 3) { defFactor = 0.7; break; }
+  }
+
+  const shotChance = distFactor * angleFactor * defFactor;
+  const roll = Math.random();
+  const wideChance = (1 - shotChance) / 14;
+
+  let result;
+  if (roll < shotChance) result = 'goal';
+  else if (roll < 1 - wideChance) result = 'save';
+  else result = 'wide';
+
+  let targetY;
+  if (result === 'goal') targetY = 44 + Math.random() * 12;
+  else if (result === 'save') targetY = Math.max(38, Math.min(62, carrier.y + (Math.random() - 0.5) * 8));
+  else targetY = carrier.y > 50 ? 65 + Math.random() * 10 : 35 - Math.random() * 10;
+
+  carrier.hasBall = false;
+  s.ball.carrier = null;
+  s.passBall = null;
+  s.shot = {
+    result, shootingTeam,
+    fromX: carrier.x, fromY: carrier.y,
+    targetX: goalX, targetY,
+    ticksTotal: SHOT_ANIM_TICKS, ticksElapsed: 0,
+  };
+  s.phase = 'shot';
+  return s;
+}
+
+function updateShotAnimation(state) {
+  let s = { ...state, tick: state.tick + 1, players: state.players.map(p => ({ ...p })) };
+  s.ball = { ...s.ball };
+  s.shot = { ...s.shot };
+
+  s.shot.ticksElapsed++;
+  const progress = s.shot.ticksElapsed / s.shot.ticksTotal;
+
+  s.ball.x = s.shot.fromX + (s.shot.targetX - s.shot.fromX) * progress;
+  s.ball.y = s.shot.fromY + (s.shot.targetY - s.shot.fromY) * progress;
+
+  // Keeper slides toward ball
+  const keeperId = s.shot.shootingTeam === 'home' ? 'away_0' : 'home_0';
+  const keeper = s.players.find(p => p.id === keeperId);
+  if (keeper) {
+    keeper.y += (s.shot.targetY - keeper.y) * 0.15;
+  }
+
+  if (s.shot.ticksElapsed >= s.shot.ticksTotal) {
+    if (s.shot.result === 'goal') {
+      if (s.shot.shootingTeam === 'home') s.score = { ...s.score, home: s.score.home + 1 };
+      else s.score = { ...s.score, away: s.score.away + 1 };
+      s.lastGoalBy = s.shot.shootingTeam;
+      s.phase = 'goal_celebration';
+      s.goalTimer = s.tick + GOAL_CELEBRATION_TICKS;
+      s.shot = null;
+    } else if (s.shot.result === 'save') {
+      const reboundX = s.shot.targetX < 50 ? 10 : 90;
+      s.ball.x = reboundX;
+      s.ball.y = 40 + Math.random() * 20;
+      s.ball.loose = true;
+      s.ball.looseTimer = s.tick + LOOSE_BALL_TICKS;
+      s.ball.lastCarrierId = null;
+      s.phase = 'play';
+      s.shot = null;
+    } else {
+      // Wide — goal kick
+      const defendingTeam = s.shot.shootingTeam === 'home' ? 'away' : 'home';
+      const gk = s.players.find(p => p.team === defendingTeam && p.role === 'GK');
+      const gkX = s.shot.targetX < 50 ? 8 : 92;
+      s.ball.x = gkX;
+      s.ball.y = 50;
+      s.ball.loose = false;
+      s.possession = defendingTeam;
+      if (gk) {
+        gk.hasBall = true;
+        s.ball.carrier = gk.id;
+        gk.settlingUntil = s.tick + SETTLING_TICKS;
+      }
+      s.phase = 'play';
+      s.shot = null;
+      s.cpuThreatDetectedTick = null;
+      s.cpuNextStrategyTick = s.tick + 30;
+    }
+  }
+  return s;
+}
+
+function resetForKickoff(s) {
+  const concededTeam = s.lastGoalBy === 'home' ? 'away' : 'home';
+  const half = s.clock.half;
+
+  const players = [];
+  HOME_FORMATION.forEach((f, i) => {
+    const fx = half === 2 ? 100 - f.x : f.x;
+    players.push({
+      id: 'home_' + i, team: 'home', role: f.role,
+      x: fx, y: f.y, homeX: fx, homeY: f.y,
+      vx: 0, vy: 0, hasBall: false,
+      burstTarget: null, burstCooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+    });
+  });
+  AWAY_FORMATION.forEach((f, i) => {
+    const fx = half === 2 ? 100 - f.x : f.x;
+    players.push({
+      id: 'away_' + i, team: 'away', role: f.role,
+      x: fx, y: f.y, homeX: fx, homeY: f.y,
+      vx: 0, vy: 0, hasBall: false,
+      burstTarget: null, burstCooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+    });
+  });
+
+  const kickoffId = concededTeam === 'home' ? 'home_9' : 'away_9';
+  const kickoffPlayer = players.find(p => p.id === kickoffId);
+  kickoffPlayer.x = 50;
+  kickoffPlayer.y = 50;
+  kickoffPlayer.hasBall = true;
+
+  return {
+    ...s, players,
+    ball: { x: 50, y: 50, carrier: kickoffId, loose: false, velocity: null,
+            lastCarrierId: null, looseTimer: 0 },
+    possession: concededTeam,
+    passBall: null, shot: null,
+    cpuThreatDetectedTick: null, cpuNextStrategyTick: 0,
+  };
+}
+
+function startSecondHalf(state) {
+  const players = [];
+  HOME_FORMATION.forEach((f, i) => {
+    players.push({
+      id: 'home_' + i, team: 'home', role: f.role,
+      x: 100 - f.x, y: f.y, homeX: 100 - f.x, homeY: f.y,
+      vx: 0, vy: 0, hasBall: false,
+      burstTarget: null, burstCooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+    });
+  });
+  AWAY_FORMATION.forEach((f, i) => {
+    players.push({
+      id: 'away_' + i, team: 'away', role: f.role,
+      x: 100 - f.x, y: f.y, homeX: 100 - f.x, homeY: f.y,
+      vx: 0, vy: 0, hasBall: false,
+      burstTarget: null, burstCooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+    });
+  });
+  const kickoffPlayer = players.find(p => p.id === 'away_9');
+  kickoffPlayer.x = 50;
+  kickoffPlayer.y = 50;
+  kickoffPlayer.hasBall = true;
+  return {
+    ...state, players,
+    ball: { x: 50, y: 50, carrier: 'away_9', loose: false, velocity: null,
+            lastCarrierId: null, looseTimer: 0 },
+    possession: 'away',
+    clock: { ...state.clock, half: 2 },
+    passBall: null, shot: null,
+    cpuThreatDetectedTick: null, cpuNextStrategyTick: 0,
+    phase: 'kickoff_pause', kickoffTimer: state.tick + KICKOFF_PAUSE_TICKS,
+  };
+}
+
+function checkOutOfBounds(s) {
+  if (!s.ball.carrier || s.ball.loose || s.passBall) return s;
+  const carrier = s.players.find(p => p.id === s.ball.carrier);
+  if (!carrier) return s;
+
+  // Sidelines (y)
+  if (carrier.y < 0 || carrier.y > 100) {
+    const otherTeam = carrier.team === 'home' ? 'away' : 'home';
+    const bx = Math.max(1, Math.min(99, carrier.x));
+    const by = carrier.y < 0 ? 1 : 99;
+    let nearest = null, nd = Infinity;
+    for (const p of s.players) {
+      if (p.team !== otherTeam) continue;
+      const d = getDist(p.x, p.y, bx, by);
+      if (d < nd) { nd = d; nearest = p; }
+    }
+    carrier.hasBall = false; carrier.burstTarget = null;
+    s.ball.carrier = null;
+    if (nearest) {
+      nearest.hasBall = true; nearest.settlingUntil = s.tick + SETTLING_TICKS;
+      s.ball.carrier = nearest.id;
+    }
+    s.ball.x = bx; s.ball.y = by; s.ball.loose = false;
+    s.possession = otherTeam; s.passBall = null;
+    s.phase = 'oob_pause'; s.oobTimer = s.tick + OOB_PAUSE_TICKS;
+    s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
+    return s;
+  }
+
+  // Endlines (x)
+  if (carrier.x < 0 || carrier.x > 100) {
+    const half = s.clock.half;
+    const endX = carrier.x < 0 ? 0 : 100;
+    const carrierGoalX = getAttackGoalX(carrier.team, half);
+    const isAttacking = Math.abs(carrierGoalX - endX) < 1;
+    carrier.hasBall = false; carrier.burstTarget = null;
+    s.ball.carrier = null; s.passBall = null;
+    if (isAttacking) {
+      // Goal kick for defending team
+      const defTeam = carrier.team === 'home' ? 'away' : 'home';
+      const gkX = endX < 50 ? 8 : 92;
+      const gk = s.players.find(p => p.team === defTeam && p.role === 'GK');
+      s.ball.x = gkX; s.ball.y = 50; s.ball.loose = false;
+      s.possession = defTeam;
+      if (gk) { gk.hasBall = true; gk.settlingUntil = s.tick + SETTLING_TICKS; s.ball.carrier = gk.id; }
+    } else {
+      // Corner — treated as throw-in per Alpha spec
+      const atkTeam = carrier.team === 'home' ? 'away' : 'home';
+      const cx = endX < 50 ? 1 : 99;
+      const cy = carrier.y > 50 ? 99 : 1;
+      let nearest = null, nd = Infinity;
+      for (const p of s.players) {
+        if (p.team !== atkTeam) continue;
+        const d = getDist(p.x, p.y, cx, cy);
+        if (d < nd) { nd = d; nearest = p; }
+      }
+      s.ball.x = cx; s.ball.y = cy; s.ball.loose = false;
+      s.possession = atkTeam;
+      if (nearest) { nearest.hasBall = true; nearest.settlingUntil = s.tick + SETTLING_TICKS; s.ball.carrier = nearest.id; }
+    }
+    s.phase = 'oob_pause'; s.oobTimer = s.tick + OOB_PAUSE_TICKS;
+    s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
+    return s;
+  }
+  return s;
+}
+
+function tapDefender(state, playerId) {
+  if (state.phase !== 'play') return state;
+  if (state.possession !== 'away') return state;
+  if (state.ball.loose) return state;
+
+  const defender = state.players.find(p => p.id === playerId);
+  if (!defender || defender.team !== 'home') return state;
+  if (defender.burstCooldownUntil > state.tick) return state;
+
+  const carrier = state.players.find(p => p.id === state.ball.carrier);
+  if (!carrier) return state;
+
+  const s = { ...state, players: state.players.map(p => ({ ...p })) };
+  const d = s.players.find(p => p.id === defender.id);
+  d.burstTarget = { x: carrier.x, y: carrier.y };
+  return s;
+}
+
+// ==================== ORIGINAL INPUT HANDLING ====================
+
+function tapPlayer(state, playerId) {
+  if (state.phase !== 'play') return state;
+  if (state.possession !== 'home') return state;
+  if (state.passBall) return state; // ball in flight
+
+  const target = state.players.find(p => p.id === playerId);
+  if (!target || target.team !== 'home') return state;
+
+  const carrier = state.players.find(p => p.id === state.ball.carrier);
+  if (!carrier || carrier.team !== 'home') return state;
+  if (carrier.settlingUntil > state.tick) return state; // settling
+  if (target.id === carrier.id) return state; // can't pass to self
+
+  // Start pass
+  const s = { ...state, players: state.players.map(p => ({ ...p })) };
+  const c = s.players.find(p => p.id === carrier.id);
+  c.hasBall = false;
+
+  s.ball = { ...s.ball, carrier: null };
+  s.passIdCounter = (s.passIdCounter || 0) + 1;
+  s.passBall = {
+    fromX: c.x, fromY: c.y,
+    toId: target.id, targetPos: null,
+    x: c.x, y: c.y,
+    trail: [], fromTeam: 'home',
+    passId: s.passIdCounter, checkedBy: new Set(),
+  };
+
+  return s;
+}
+
+function tapField(state, x, y) {
+  if (state.phase !== 'play') return state;
+  if (state.possession !== 'home') return state;
+  if (state.passBall) return state;
+
+  const carrier = state.players.find(p => p.id === state.ball.carrier);
+  if (!carrier || carrier.team !== 'home') return state;
+  if (carrier.settlingUntil > state.tick) return state;
+  if (carrier.burstCooldownUntil > state.tick) return state;
+  if (carrier.role === 'GK') return state; // GK can't burst
+
+  const s = { ...state, players: state.players.map(p => ({ ...p })) };
+  const c = s.players.find(p => p.id === carrier.id);
+  c.burstTarget = { x, y };
+
+  return s;
+}
+
+// ==================== REACT RENDERER ====================
+const { useState, useEffect, useRef, useCallback } = React;
+
+function App() {
+  const [gameState, setGameState] = useState(createInitialState);
+  const stateRef = useRef(gameState);
+  const pixelsPerUnitRef = useRef(1);
+  const fieldRef = useRef(null);
+  const containerRef = useRef(null);
+  const [fieldDims, setFieldDims] = useState({ width: 600, height: 400 });
+
+  stateRef.current = gameState;
+
+  // Calculate field dimensions
+  const calcDims = useCallback(() => {
+    const pad = 16;
+    const maxW = window.innerWidth - pad * 2;
+    const maxH = window.innerHeight - 60 - pad * 2; // leave room for HUD
+    let w = maxW;
+    let h = w / 1.5;
+    if (h > maxH) { h = maxH; w = h * 1.5; }
+    pixelsPerUnitRef.current = w / 100;
+    setFieldDims({ width: w, height: h });
+  }, []);
+
+  useEffect(() => {
+    calcDims();
+    window.addEventListener('resize', calcDims);
+    return () => window.removeEventListener('resize', calcDims);
+  }, [calcDims]);
+
+  // Toggle scroll: allow on title screen, lock during gameplay
+  useEffect(() => {
+    if (gameState.phase === 'title') {
+      document.documentElement.style.overflow = 'auto';
+      document.body.style.overflow = 'auto';
+    } else {
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+    }
+  }, [gameState.phase]);
+
+  // Game tick
+  useEffect(() => {
+    if (gameState.phase === 'title') return;
+    const id = setInterval(() => {
+      setGameState(prev => updateGame(prev, { type: 'TICK' }));
+    }, TICK_MS);
+    return () => clearInterval(id);
+  }, [gameState.phase]);
+
+  const dispatch = useCallback((action) => {
+    setGameState(prev => updateGame(prev, action));
+  }, []);
+
+  const handleFieldPointerDown = useCallback((e) => {
+    const state = stateRef.current;
+    if (state.phase !== 'play') return;
+    if (state.ball.loose || state.passBall) return;
+
+    const rect = fieldRef.current.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const ppu = pixelsPerUnitRef.current;
+    const gx = px / ppu;
+    const gy = py / (fieldDims.height / 100);
+
+    const tapRadius = 48;
+
+    if (state.possession === 'home') {
+      // Check shooting first
+      const carrier = state.players.find(p => p.id === state.ball.carrier);
+      const hGoalX = getAttackGoalX('home', state.clock.half);
+      const inRange = carrier && Math.abs(hGoalX - carrier.x) <= SHOOT_RANGE_X;
+      const isGoalTap = hGoalX === 100 ? gx >= 85 : gx <= 15;
+      if (inRange && isGoalTap) {
+        dispatch({ type: 'SHOOT' });
+        return;
+      }
+
+      // Check if tap is on a home player (pass)
+      let tappedPlayer = null;
+      let minDist = Infinity;
+      for (const p of state.players) {
+        if (p.team !== 'home') continue;
+        const ppx = p.x * ppu;
+        const ppy = p.y * (fieldDims.height / 100);
+        const dist = Math.sqrt((px - ppx) ** 2 + (py - ppy) ** 2);
+        if (dist < tapRadius && dist < minDist) {
+          minDist = dist;
+          tappedPlayer = p;
+        }
+      }
+
+      if (tappedPlayer && tappedPlayer.id !== state.ball.carrier) {
+        dispatch({ type: 'TAP_PLAYER', playerId: tappedPlayer.id });
+      } else {
+        dispatch({ type: 'TAP_FIELD', x: gx, y: gy });
+      }
+    } else if (state.possession === 'away') {
+      // Tap home player to commit defender
+      let tappedPlayer = null;
+      let minDist = Infinity;
+      for (const p of state.players) {
+        if (p.team !== 'home') continue;
+        const ppx = p.x * ppu;
+        const ppy = p.y * (fieldDims.height / 100);
+        const dist = Math.sqrt((px - ppx) ** 2 + (py - ppy) ** 2);
+        if (dist < tapRadius && dist < minDist) {
+          minDist = dist;
+          tappedPlayer = p;
+        }
+      }
+      if (tappedPlayer) {
+        dispatch({ type: 'TAP_DEFENDER', playerId: tappedPlayer.id });
+      }
+    }
+  }, [dispatch, fieldDims]);
+
+  // TITLE SCREEN + LANDING PAGE
+  if (gameState.phase === 'title') {
+    return React.createElement('div', { className: 'landing-wrapper' },
+      React.createElement('div', { className: 'title-screen' },
+        React.createElement('h1', null, 'Soccer Mamas'),
+        React.createElement('div', { className: 'subtitle' },
+          'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
+        ),
+        React.createElement('div', { className: 'version' }, 'Alpha 1.0.1 test build'),
+        React.createElement('button', {
+          onClick: () => dispatch({ type: 'START_GAME' })
+        }, 'KICK OFF')
+      ),
+      React.createElement('div', { className: 'landing-content' },
+        // Feedback section
+        React.createElement('div', { className: 'landing-card feedback-card' },
+          React.createElement('p', null, 'Played it? Broke it? Have thoughts? Let me know.'),
+          React.createElement('a', {
+            href: 'https://docs.google.com/forms/d/e/1FAIpQLScpBfQ2cYIZmZngcsAf6fN7LhZ4EnUeMTZ7wswL-0FovC4c0g/viewform?usp=header',
+            target: '_blank', rel: 'noopener noreferrer', className: 'feedback-btn'
+          }, 'Give Feedback')
+        ),
+        // About the Project
+        React.createElement('h2', { className: 'landing-heading' }, 'About the Project'),
+        React.createElement('p', { className: 'landing-text' },
+          'This is a game design project, primarily for ',
+          React.createElement('strong', null, 'teaching and learning'),
+          ' about soccer and football. Soccer Mamas is a very rough first-draft prototype. Everything is Alpha versioned -- not expected to completely work.'
+        ),
+        // Game Mode
+        React.createElement('div', { className: 'landing-card mode-card' },
+          React.createElement('h3', null, 'Game Mode'),
+          React.createElement('p', null,
+            React.createElement('strong', { className: 'highlight' }, 'Single and two-player'),
+            ' (on separate devices). Gets closer to realism in scoring and ball movement at higher tiers -- from Kickabout (training wheels, lots of goals) through Friendly, League Match, and Cup Final.'
+          )
+        ),
+        // Sandbox Mode
+        React.createElement('div', { className: 'landing-card mode-card' },
+          React.createElement('h3', null, 'Sandbox Mode'),
+          React.createElement('p', null, 'Manual placement of all players for instruction purposes. Run the game from that point to show the importance of positioning and setting up plays. For coaches and players learning the game.')
+        ),
+        // Personality powers
+        React.createElement('p', { className: 'landing-text' },
+          'On the map: ',
+          React.createElement('strong', null, 'individual player personalities'),
+          ' with corresponding special abilities -- grouchy (other players avoid), garrulous (teammates congregate around), scary (clears a lane), always on the phone (good at longer distance plays) -- and ',
+          React.createElement('strong', null, 'specific names and avatars/photographs'),
+          ' for teaching or just for fun.'
+        ),
+        // Landscape note
+        React.createElement('p', { className: 'landscape-note' }, 'Best played in landscape mode'),
+        // Other alphas
+        React.createElement('div', { className: 'landing-card' },
+          React.createElement('p', { className: 'landing-caption' }, 'Other testing alphas in the same project:'),
+          React.createElement('div', { className: 'alpha-links' },
+            React.createElement('a', { href: 'https://kpurdddy.github.io/soccermommas/', target: '_blank', rel: 'noopener noreferrer' }, 'Soccer Mamas'),
+            React.createElement('a', { href: 'https://kpurdddy.github.io/Hailmarys/', target: '_blank', rel: 'noopener noreferrer' }, 'Hail Marys (tactical football)')
+          )
+        ),
+        // Experimental note
+        React.createElement('hr', { className: 'landing-divider' }),
+        React.createElement('p', { className: 'experimental-note' },
+          'This is an experimental project. It could prove too ambitious, but that\'s the point of trying. Someone else might take it over -- we\'ll see.'
+        )
+      )
+    );
+  }
+
+  // GAME SCREEN
+  const ppu = pixelsPerUnitRef.current;
+  const fw = fieldDims.width;
+  const fh = fieldDims.height;
+  const ypu = fh / 100;
+
+  // Clock display — scaled game time
+  const gameSeconds = gameState.clock.elapsed * TICK_MS / 1000 * GAME_TIME_SCALE;
+  const displayMin = Math.floor(gameSeconds / 60);
+  const displaySec = Math.floor(gameSeconds % 60);
+  const clockStr = displayMin + ':' + (displaySec < 10 ? '0' : '') + displaySec;
+  const halfStr = gameState.clock.half === 1 ? '1st Half' : '2nd Half';
+
+  // Shooting range check for visual indicator
+  const homeGoalX = getAttackGoalX('home', gameState.clock.half);
+  const homeCarrier = gameState.possession === 'home' && gameState.ball.carrier
+    ? gameState.players.find(p => p.id === gameState.ball.carrier) : null;
+  const showShootIndicator = homeCarrier && Math.abs(homeGoalX - homeCarrier.x) <= SHOOT_RANGE_X;
+
+  return React.createElement('div', { className: 'game-container', ref: containerRef },
+    // HUD
+    React.createElement('div', { className: 'hud', style: { maxWidth: fw } },
+      React.createElement('span', { className: 'half' },
+        (gameState.possession === 'home' ? '\u{1F7E6} ' : '\u{1F7E5} ') + halfStr),
+      React.createElement('span', { className: 'score' },
+        gameState.score.home + ' \u2014 ' + gameState.score.away
+      ),
+      React.createElement('span', { className: 'clock' }, clockStr)
+    ),
+
+    // PITCH (wrapped in div for overlay positioning)
+    React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
+      React.createElement('svg', {
+        ref: fieldRef,
+        width: fw, height: fh,
+        style: { display: 'block', touchAction: 'none', cursor: 'pointer' },
+        onPointerDown: handleFieldPointerDown,
+      },
+        // Grass
+        React.createElement('rect', { x: 0, y: 0, width: fw, height: fh, fill: '#2d8a4e', rx: 4 }),
+
+        // Pitch lines
+        ...renderPitchLines(fw, fh, ppu, ypu),
+
+        // Shooting range highlight
+        showShootIndicator ? React.createElement('rect', {
+          key: 'shoot-zone',
+          x: homeGoalX === 100 ? fw - 15 * ppu : 0, y: (50 - 12) * ypu,
+          width: 15 * ppu, height: 24 * ypu,
+          fill: '#ffd700', opacity: 0.15 + 0.05 * Math.sin(gameState.tick * 0.15),
+          rx: 4,
+        }) : null,
+
+        // Ball trail
+        ...(gameState.passBall ? gameState.passBall.trail.map((t, i) =>
+          React.createElement('circle', {
+            key: 'trail_' + i,
+            cx: t.x * ppu, cy: t.y * ypu, r: 4,
+            fill: 'yellow', opacity: t.opacity * 0.5
+          })
+        ) : []),
+
+        // Player tokens
+        ...gameState.players.map(p => renderPlayer(p, ppu, ypu, gameState)),
+
+        // Ball
+        React.createElement('circle', {
+          key: 'ball',
+          cx: gameState.ball.x * ppu, cy: gameState.ball.y * ypu,
+          r: Math.max(5, ppu * 0.8),
+          fill: '#ffe033', stroke: '#cc9900', strokeWidth: 1.5,
+        }),
+
+        // Gold carrier ring
+        gameState.ball.carrier && (() => {
+          const c = gameState.players.find(p => p.id === gameState.ball.carrier);
+          if (!c) return null;
+          const settling = c.settlingUntil > gameState.tick;
+          return React.createElement('circle', {
+            key: 'carrier-ring',
+            cx: c.x * ppu, cy: c.y * ypu,
+            r: Math.max(18, ppu * 2.2),
+            fill: 'none', stroke: '#ffd700',
+            strokeWidth: settling ? 2 : 3,
+            opacity: settling ? 0.5 + 0.3 * Math.sin(gameState.tick * 0.5) : 0.8 + 0.2 * Math.sin(gameState.tick * 0.21),
+          });
+        })(),
+
+        // Loose ball indicator
+        gameState.ball.loose ? React.createElement('circle', {
+          key: 'loose-ring',
+          cx: gameState.ball.x * ppu, cy: gameState.ball.y * ypu,
+          r: Math.max(12, ppu * 1.5),
+          fill: 'none', stroke: 'white', strokeWidth: 2,
+          opacity: 0.5 + 0.3 * Math.sin(gameState.tick * 0.3),
+          strokeDasharray: '4 3',
+        }) : null,
+      ),
+
+      // GOAL! overlay
+      gameState.phase === 'goal_celebration' ? React.createElement('div', {
+        key: 'goal-overlay',
+        style: {
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none',
+        }
+      }, React.createElement('div', {
+        style: {
+          fontSize: Math.max(48, fw * 0.1) + 'px', fontWeight: 'bold',
+          color: '#ffd700', textShadow: '0 0 20px rgba(255,215,0,0.8), 0 4px 8px rgba(0,0,0,0.5)',
+          letterSpacing: '8px', fontFamily: 'Arial, sans-serif',
+        }
+      }, 'GOAL!')) : null,
+
+      // Kickoff pause overlay
+      gameState.phase === 'kickoff_pause' ? React.createElement('div', {
+        key: 'kickoff-overlay',
+        style: {
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none',
+        }
+      }, React.createElement('div', {
+        style: {
+          fontSize: Math.max(24, fw * 0.04) + 'px', fontWeight: 'bold',
+          color: 'white', textShadow: '0 2px 6px rgba(0,0,0,0.6)',
+          fontFamily: 'Arial, sans-serif',
+        }
+      }, 'KICK OFF')) : null,
+
+      // Halftime overlay
+      gameState.phase === 'halftime' ? React.createElement('div', {
+        key: 'halftime-overlay',
+        style: {
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.5)', cursor: 'pointer',
+        },
+        onPointerDown: () => dispatch({ type: 'START_SECOND_HALF' }),
+      },
+        React.createElement('div', {
+          style: { fontSize: Math.max(36, fw * 0.07) + 'px', fontWeight: 'bold', color: 'white',
+            textShadow: '0 2px 8px rgba(0,0,0,0.7)', letterSpacing: '4px', marginBottom: '16px' }
+        }, 'HALFTIME'),
+        React.createElement('div', {
+          style: { fontSize: Math.max(24, fw * 0.05) + 'px', fontWeight: 'bold', color: 'white',
+            textShadow: '0 2px 4px rgba(0,0,0,0.6)', marginBottom: '16px' }
+        }, gameState.score.home + ' \u2014 ' + gameState.score.away),
+        React.createElement('div', {
+          style: { fontSize: Math.max(14, fw * 0.025) + 'px', color: '#ccc' }
+        }, 'Tap to continue'),
+      ) : null,
+
+      // Full time overlay
+      gameState.phase === 'fulltime' ? React.createElement('div', {
+        key: 'fulltime-overlay',
+        style: {
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.6)',
+        },
+      },
+        React.createElement('div', {
+          style: { fontSize: Math.max(36, fw * 0.07) + 'px', fontWeight: 'bold', color: 'white',
+            textShadow: '0 2px 8px rgba(0,0,0,0.7)', letterSpacing: '4px', marginBottom: '16px' }
+        }, 'FULL TIME'),
+        React.createElement('div', {
+          style: { fontSize: Math.max(24, fw * 0.05) + 'px', fontWeight: 'bold', color: 'white',
+            textShadow: '0 2px 4px rgba(0,0,0,0.6)', marginBottom: '8px' }
+        }, gameState.score.home + ' \u2014 ' + gameState.score.away),
+        React.createElement('div', {
+          style: { fontSize: Math.max(18, fw * 0.035) + 'px', color: '#ffd700', marginBottom: '24px' }
+        }, gameState.score.home > gameState.score.away ? 'You Win!' :
+           gameState.score.away > gameState.score.home ? 'You Lose!' : 'Draw!'),
+        React.createElement('button', {
+          style: { fontSize: '1.2em', padding: '12px 36px', background: '#27ae60', color: 'white',
+            border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' },
+          onClick: () => dispatch({ type: 'PLAY_AGAIN' }),
+        }, 'PLAY AGAIN'),
+      ) : null,
+    ),
+
+    // Version text
+    React.createElement('div', { className: 'version-text' }, 'Soccer Mamas -- Alpha 1.0.1')
+  );
+}
+
+function renderPlayer(p, ppu, ypu, gs) {
+  const r = Math.max(14, ppu * 1.7);
+  const isHome = p.team === 'home';
+  const fill = isHome ? '#2563eb' : '#dc2626';
+  const stroke = isHome ? '#1d4ed8' : '#b91c1c';
+  const cx = p.x * ppu;
+  const cy = p.y * ypu;
+  const fontSize = Math.max(8, r * 0.65);
+
+  return React.createElement('g', { key: p.id },
+    React.createElement('circle', {
+      cx, cy, r, fill, stroke, strokeWidth: 2, opacity: 0.92
+    }),
+    React.createElement('text', {
+      x: cx, y: cy + fontSize * 0.35,
+      textAnchor: 'middle', fill: 'white',
+      fontSize, fontWeight: 'bold', fontFamily: 'Arial, sans-serif',
+      style: { pointerEvents: 'none', userSelect: 'none' },
+    }, p.role)
+  );
+}
+
+function renderPitchLines(fw, fh, ppu, ypu) {
+  const lc = 'rgba(255,255,255,0.8)';
+  const lw = 1.5;
+  const lines = [];
+
+  // Outline
+  lines.push(React.createElement('rect', {
+    key: 'outline', x: 1, y: 1, width: fw - 2, height: fh - 2,
+    fill: 'none', stroke: lc, strokeWidth: lw + 0.5,
+  }));
+
+  // Halfway line
+  lines.push(React.createElement('line', {
+    key: 'half', x1: fw / 2, y1: 0, x2: fw / 2, y2: fh,
+    stroke: lc, strokeWidth: lw,
+  }));
+
+  // Center circle
+  const ccr = 9.15 * ppu; // ~9.15 units
+  lines.push(React.createElement('circle', {
+    key: 'cc', cx: fw / 2, cy: fh / 2, r: ccr,
+    fill: 'none', stroke: lc, strokeWidth: lw,
+  }));
+
+  // Center spot
+  lines.push(React.createElement('circle', {
+    key: 'cs', cx: fw / 2, cy: fh / 2, r: 3, fill: lc,
+  }));
+
+  // Penalty boxes (18-yard box = ~16.5% of field length, ~44% of width centered)
+  const pbW = 16.5 * ppu;
+  const pbH = 44 * ypu;
+  const pbTop = (fh - pbH) / 2;
+  // Left
+  lines.push(React.createElement('rect', {
+    key: 'pb-l', x: 0, y: pbTop, width: pbW, height: pbH,
+    fill: 'none', stroke: lc, strokeWidth: lw,
+  }));
+  // Right
+  lines.push(React.createElement('rect', {
+    key: 'pb-r', x: fw - pbW, y: pbTop, width: pbW, height: pbH,
+    fill: 'none', stroke: lc, strokeWidth: lw,
+  }));
+
+  // Goal areas (6-yard box = ~5.5% of field length, ~20% of width centered)
+  const gaW = 5.5 * ppu;
+  const gaH = 20 * ypu;
+  const gaTop = (fh - gaH) / 2;
+  lines.push(React.createElement('rect', {
+    key: 'ga-l', x: 0, y: gaTop, width: gaW, height: gaH,
+    fill: 'none', stroke: lc, strokeWidth: lw,
+  }));
+  lines.push(React.createElement('rect', {
+    key: 'ga-r', x: fw - gaW, y: gaTop, width: gaW, height: gaH,
+    fill: 'none', stroke: lc, strokeWidth: lw,
+  }));
+
+  // Penalty spots (12 yards from goal = ~11% of field length)
+  const psX = 11 * ppu;
+  lines.push(React.createElement('circle', {
+    key: 'ps-l', cx: psX, cy: fh / 2, r: 3, fill: lc,
+  }));
+  lines.push(React.createElement('circle', {
+    key: 'ps-r', cx: fw - psX, cy: fh / 2, r: 3, fill: lc,
+  }));
+
+  // Goals (white rectangles on endlines)
+  const goalH = 12 * ypu;
+  const goalW = 2 * ppu;
+  const goalTop = (fh - goalH) / 2;
+  lines.push(React.createElement('rect', {
+    key: 'goal-l', x: -goalW + 1, y: goalTop, width: goalW, height: goalH,
+    fill: 'none', stroke: 'white', strokeWidth: 2.5,
+  }));
+  lines.push(React.createElement('rect', {
+    key: 'goal-r', x: fw - 1, y: goalTop, width: goalW, height: goalH,
+    fill: 'none', stroke: 'white', strokeWidth: 2.5,
+  }));
+
+  // Corner arcs
+  const car = 2.5 * ppu;
+  const corners = [
+    { cx: 0, cy: 0, a1: 0, a2: 90 },         // top-left
+    { cx: fw, cy: 0, a1: 90, a2: 180 },       // top-right
+    { cx: 0, cy: fh, a1: 270, a2: 360 },      // bottom-left
+    { cx: fw, cy: fh, a1: 180, a2: 270 },     // bottom-right
+  ];
+  corners.forEach((c, i) => {
+    const r1 = (c.a1 * Math.PI) / 180;
+    const r2 = (c.a2 * Math.PI) / 180;
+    const x1 = c.cx + car * Math.cos(r1);
+    const y1 = c.cy + car * Math.sin(r1);
+    const x2 = c.cx + car * Math.cos(r2);
+    const y2 = c.cy + car * Math.sin(r2);
+    lines.push(React.createElement('path', {
+      key: 'corner_' + i,
+      d: `M ${x1} ${y1} A ${car} ${car} 0 0 1 ${x2} ${y2}`,
+      fill: 'none', stroke: lc, strokeWidth: lw,
+    }));
+  });
+
+  return lines;
+}
+
+// ==================== MOUNT ====================
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+</script>
+</body>
+</html>

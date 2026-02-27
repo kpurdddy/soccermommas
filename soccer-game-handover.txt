@@ -1,0 +1,170 @@
+# Soccer Game — Design Handover
+
+## Concept
+
+A tactical soccer game using the same fixed-field architecture as Hail Marys (the early versions that worked). Designed for the same "bar test" audience — someone who's never played a soccer video game should be able to pick it up with zero instruction.
+
+## Core Mechanic
+
+Two inputs. That's the entire control scheme:
+
+- **Tap a teammate** → pass to them
+- **Tap the field** → ball carrier runs toward that point
+
+Everything else — positioning, defense, pressure, interceptions — is emergent from movement rules.
+
+## Movement System
+
+### Drift Layer (always active)
+- All 20 outfield players move continuously at ~0.5 speed units per tick
+- Attackers drift loosely toward the opponent's goal, maintaining a rough formation shape
+- Defenders drift to maintain shape relative to the ball position
+- Nobody is ever standing still — the pitch is always alive
+- When no input happens, the shape of play slowly evolves on its own
+
+### Burst Layer (triggered by player input)
+- **Run:** Ball carrier moves at ~3x drift speed toward the tapped field position. All other players continue at drift speed. When the carrier reaches the destination (or gets close enough), they revert to drift speed in the same direction they were running. Everyone else continues drifting in their current directions.
+- **Pass:** Ball travels at ~5x drift speed to the tapped teammate. Brief "settling" window (~500ms) where the receiver can't immediately burst — simulates first touch. After settling, the receiver has the ball and can be directed.
+
+### Risk-Distance Tradeoff (the core learning loop)
+- Tap far downfield → long run → defenders close in → interception likely
+- Tap nearby → short run → safe but no progress
+- The player naturally learns: short runs, then pass. That's actual soccer.
+- "If I run this direction, that defender commits, which opens a pass to the winger" — real tactical thinking, discovered not taught.
+
+## Interception / Tackling
+
+- **During a run:** If the carrier's path brings them within ~2 units of a defender, there's a tackle probability based on proximity. Closer = higher chance. The carrier doesn't stop at the defender — they keep moving toward the tap point, but the defender gets a chance to dispossess.
+- **During a pass:** If any defender is within ~2 units of the line between passer and receiver, interception probability based on how close they are to the passing lane. A defender standing directly in the lane = high interception. A defender 1.5 units off the lane = low chance.
+- **Loose ball:** On a successful tackle or failed interception attempt that deflects the ball, the ball becomes loose. Nearest player (any team) picks it up. If the CPU gets it, possession flips.
+
+## CPU Possession
+
+When the CPU has the ball, the same drift/burst system runs automatically:
+- CPU players pass and run using simple AI (prefer forward passes, take short safe options, occasionally try a through ball)
+- The human's defenders drift automatically to maintain shape
+- The human can tap their own defenders to influence positioning — tap a defender, they sprint toward the ball carrier (committing, which opens space elsewhere)
+- Or do nothing and let the AI defense handle it (safer but less aggressive)
+
+This gives the player something to do on defense without requiring complex tactical controls.
+
+## Shooting
+
+- When the ball carrier is within ~25 yards of goal, tapping the goal triggers a shot
+- Success probability based on: distance, angle, nearest defender proximity, goalkeeper positioning
+- Visual: ball travels toward goal, keeper dives, either saves or scores
+- Goal celebration: brief animation, score updates, restart from center
+
+## Field & Rendering
+
+### Architecture
+- Fixed-field rectangle, no scrolling, no camera system
+- Soccer pitch ratio ~1.5:1 (e.g., 720×480 or scaled to viewport)
+- All 22 players visible at all times (20 outfield + 2 keepers)
+- Responsive: field width = viewport width (with padding), height scales proportionally
+- On phones: smaller but complete. Every player visible.
+
+### Visual Style
+- Green pitch with white lines (center circle, penalty boxes, halfway line)
+- Player tokens: circles with position labels (similar to Hail Marys)
+- Attacking team: blue tokens. Defending team: red tokens.
+- Ball: small yellow/white circle, visually distinct
+- Ball carrier gets a highlight ring (gold)
+- Passing lanes: when you have the ball, faint lines could show available passes (optional — might be cleaner without)
+
+### No camera, no scrolling, no overlays
+- The field IS the interface
+- Tap directly on the field or on players
+- Controls are the pitch itself, not buttons below it
+- The only UI outside the field: score, time, and maybe a formation selector pre-match
+
+## Difficulty Scaling
+
+All difficulty lives in a few tunable values:
+
+| Parameter | Easy | Medium | Hard |
+|-----------|------|--------|------|
+| Defender drift speed | 0.3 | 0.5 | 0.7 |
+| Burst speed multiplier | 3.5x | 3.0x | 2.5x |
+| Interception zone radius | 1.5 | 2.0 | 2.5 |
+| CPU pass accuracy | 70% | 80% | 90% |
+| CPU through ball frequency | 10% | 20% | 35% |
+| Tackle success radius | 1.5 | 2.0 | 2.5 |
+
+On Easy, your bursts outrun defenders easily and interception zones are tight — forgiving. On Hard, the speed advantage is slim and defenders read space aggressively.
+
+## Game Structure
+
+- Two halves (configurable length — maybe 3 minutes per half for a quick game)
+- Real-time clock that runs during play, stops on goals and out-of-bounds
+- Kickoff from center after goals
+- Out of bounds: if ball carrier runs past the sideline or endline, throw-in/goal kick (simplified — just give possession to the other team from that spot)
+- No fouls, no cards, no offsides (for v1 — offsides could be added later as it creates interesting tactical depth)
+
+## Formation (v1 — simple)
+
+### Player's team (attacking left to right):
+- GK (fixed near goal)
+- 4 defenders: LB, CB, CB, RB
+- 4 midfielders: LM, CM, CM, RM
+- 2 forwards: ST, ST
+
+### CPU team (same formation mirrored)
+
+Formations could be selectable in later versions (4-3-3, 3-5-2, etc.)
+
+## Technical Notes
+
+- Single HTML file, React 18, same stack as Hail Marys
+- Game loop: `setInterval` or `requestAnimationFrame` at ~30fps for the drift tick
+- Player input (taps) processed immediately, triggering burst movement
+- All coordinates as percentages of field dimensions (like v2 Hail Marys)
+- State: ball position, ball carrier, all player positions + velocity vectors, score, clock, possession
+
+## What Makes This Simpler Than Hail Marys
+- No snap/phase structure
+- No play calling or playbook
+- No down and distance
+- No pre-snap reads
+- Fewer game modes (just play)
+- Controls are spatial (tap the field) not button-based
+
+## What Makes This Harder Than Hail Marys
+- Real-time movement (drift tick always running)
+- 20 outfield players moving simultaneously
+- AI for CPU possession (passing decisions, run decisions)
+- AI for defensive positioning (maintain shape, close passing lanes)
+- Goalkeeper behavior
+
+## MVP Build Order
+
+### v0.1 — Core loop
+- Fixed field with pitch markings
+- 22 player tokens on screen
+- Drift movement running
+- Tap to pass between your players
+- Tap field to run
+- Ball visualization
+- No CPU possession, no shooting, no scoring — just move the ball around and feel the mechanic
+
+### v0.2 — Interceptions and tackling
+- Defenders can intercept passes and tackle runners
+- Possession changes
+- CPU takes possession and does simple passing
+
+### v0.3 — Shooting and scoring
+- Tap goal to shoot
+- Goalkeeper saves/misses
+- Score tracking
+- Kickoff restart
+
+### v0.4 — Full game
+- Clock, halves, game over
+- Difficulty levels
+- Polish: animations, celebrations, commentary
+
+## The Bar Test
+
+Someone picks up a phone. They see a soccer pitch with players on it. They tap a player — the ball goes there. They tap the field — their player runs. A defender gets close, they pass. They work it forward. They shoot. They score or they don't. They understood the game in 10 seconds without reading anything.
+
+That's the goal.
