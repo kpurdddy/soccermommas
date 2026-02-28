@@ -1,5 +1,20 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.0.0 (2026-02-28)
+- Major control scheme rewrite: tap-only replaced with tap + drag
+- Drag any home player to move her (works on offense and defense) -- replaces tap-to-run and two-tap defense system
+- Tap teammate = pass (unchanged), tap empty field = through ball to that spot (nearest teammate auto-runs to collect), tap goal area = shoot
+- Through ball: ball travels to tapped position as loose ball; nearest non-GK home teammate bursts toward the spot
+- Defense: tap the CPU ball carrier to commit nearest home defender to tackle (replaces select-then-tap)
+- Tap vs drag detection: >10px movement = drag, otherwise tap on pointer up
+- Shot scatter reduced (0.5x to 0.15x multiplier) -- player aim now matters significantly
+- Tighter goal tap zone: last 8 game units between posts (y 35-65) instead of last 15 units full width -- prevents accidental shots
+- Shooting zone indicator updated to match tighter zone with higher opacity
+- Post-tackle separation increased from 5 to 8 units for more convincing breakaway
+- Landing page Coaching Sandbox text updated to mention drawing paths
+- Old input functions (tapField, selectDefender, positionDefender) left as dead code for safety
+- Version updated to Alpha 2.0.0
+
 ## Alpha 1.3.1 (2026-02-27)
 - Fix save crash: declared `var targetX = goalX` in executeShot and changed shot object to use `targetX: targetX` so saves animate toward keeper position
 - Fix mobile tap highlight: added `-webkit-tap-highlight-color: transparent` to universal reset
