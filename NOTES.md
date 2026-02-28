@@ -1,5 +1,11 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.1.1 (2026-02-28)
+- Fix rubber-banding: route endpoint now rewrites homeX/homeY for outfield players so they stay where you put them instead of snapping back to formation
+- Fix GK route: moved route/burstTarget checks above GK clamp block in driftPlayers so keepers can follow drawn routes; when route ends, keeper drifts back to goal naturally
+- Version text now yellow (#FFD700) and 1.2em for visibility
+- Version updated to Alpha 2.1.1
+
 ## Alpha 2.1.0 (2026-02-28)
 - Waypoint route system: drag draws a path of waypoints, player follows them in sequence instead of beelining to finger position
 - Visible route lines on the field: dashed gold for ball carrier, blue for other home players, with small dots at each waypoint
