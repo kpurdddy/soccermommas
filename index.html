@@ -198,7 +198,7 @@ function createInitialState() {
       id: 'home_' + i, team: 'home', role: f.role,
       x: f.x, y: f.y, homeX: f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: i === 9, // first ST starts with ball
-      burstTarget: null, burstCooldownUntil: 0,
+      burstTarget: null, burstCooldownUntil: 0, route: [],
       settlingUntil: 0, cooldownUntil: 0,
     });
   });
@@ -207,7 +207,7 @@ function createInitialState() {
       id: 'away_' + i, team: 'away', role: f.role,
       x: f.x, y: f.y, homeX: f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
-      burstTarget: null, burstCooldownUntil: 0,
+      burstTarget: null, burstCooldownUntil: 0, route: [],
       settlingUntil: 0, cooldownUntil: 0,
     });
   });
@@ -248,6 +248,7 @@ function updateGame(state, action) {
     case 'POSITION_DEFENDER': return positionDefender(state, action.x, action.y);
     case 'DRAG_PLAYER': return dragPlayer(state, action.playerId, action.x, action.y);
     case 'THROUGH_BALL': return throughBall(state, action.x, action.y);
+    case 'SET_ROUTE': return setRoute(state, action.playerId, action.route);
     case 'START_SECOND_HALF': return startSecondHalf(state);
     case 'PLAY_AGAIN': return createInitialState();
     default: return state;
@@ -321,6 +322,7 @@ function gameTick(state) {
 
   s = updatePassBall(s);
   s = driftPlayers(s);
+  s = routeMovement(s);
   s = burstMovement(s);
   s = checkTackles(s);
   s = updateLooseBall(s);
@@ -467,6 +469,7 @@ function driftPlayers(s) {
     }
 
     if (p.burstTarget) continue;
+    if (p.route && p.route.length > 0) continue;
 
     let driftX = 0, driftY = 0;
     const isDefender = ['LB', 'CB', 'RB'].includes(p.role);
@@ -495,6 +498,39 @@ function driftPlayers(s) {
     p.y += (Math.random() - 0.5) * 0.04;
   }
 
+  return s;
+}
+
+function routeMovement(s) {
+  for (var i = 0; i < s.players.length; i++) {
+    var p = s.players[i];
+    if (!p.route || p.route.length === 0) continue;
+
+    var target = p.route[0];
+    var dx = target.x - p.x;
+    var dy = target.y - p.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < ARRIVAL_DIST) {
+      // Arrived at this waypoint -- consume it
+      p.route = p.route.slice(1);
+      // If more waypoints remain, move toward the next one this same tick
+      if (p.route.length > 0) {
+        var next = p.route[0];
+        var ndx = next.x - p.x;
+        var ndy = next.y - p.y;
+        var ndist = Math.sqrt(ndx * ndx + ndy * ndy);
+        if (ndist > 0.1) {
+          p.x += (ndx / ndist) * BURST_SPEED;
+          p.y += (ndy / ndist) * BURST_SPEED;
+        }
+      }
+      continue;
+    }
+
+    p.x += (dx / dist) * BURST_SPEED;
+    p.y += (dy / dist) * BURST_SPEED;
+  }
   return s;
 }
 
@@ -561,6 +597,7 @@ function checkTackles(s) {
       // Tackle successful -- ball goes directly to tackler
       carrier.hasBall = false;
       carrier.burstTarget = null;
+      carrier.route = [];
       carrier.cooldownUntil = s.tick + DISPOSSESSION_COOLDOWN_TICKS;
 
       p.hasBall = true;
@@ -849,6 +886,7 @@ function executeShot(state, carrierId, aimX, aimY) {
   }
 
   carrier.hasBall = false;
+  carrier.route = [];
   s.ball.carrier = null;
   s.passBall = null;
   s.shot = {
@@ -931,7 +969,7 @@ function resetForKickoff(s) {
       id: 'home_' + i, team: 'home', role: f.role,
       x: fx, y: f.y, homeX: fx, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
-      burstTarget: null, burstCooldownUntil: 0,
+      burstTarget: null, burstCooldownUntil: 0, route: [],
       settlingUntil: 0, cooldownUntil: 0,
     });
   });
@@ -941,7 +979,7 @@ function resetForKickoff(s) {
       id: 'away_' + i, team: 'away', role: f.role,
       x: fx, y: f.y, homeX: fx, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
-      burstTarget: null, burstCooldownUntil: 0,
+      burstTarget: null, burstCooldownUntil: 0, route: [],
       settlingUntil: 0, cooldownUntil: 0,
     });
   });
@@ -970,7 +1008,7 @@ function startSecondHalf(state) {
       id: 'home_' + i, team: 'home', role: f.role,
       x: 100 - f.x, y: f.y, homeX: 100 - f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
-      burstTarget: null, burstCooldownUntil: 0,
+      burstTarget: null, burstCooldownUntil: 0, route: [],
       settlingUntil: 0, cooldownUntil: 0,
     });
   });
@@ -979,7 +1017,7 @@ function startSecondHalf(state) {
       id: 'away_' + i, team: 'away', role: f.role,
       x: 100 - f.x, y: f.y, homeX: 100 - f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
-      burstTarget: null, burstCooldownUntil: 0,
+      burstTarget: null, burstCooldownUntil: 0, route: [],
       settlingUntil: 0, cooldownUntil: 0,
     });
   });
@@ -1016,7 +1054,7 @@ function checkOutOfBounds(s) {
       const d = getDist(p.x, p.y, bx, by);
       if (d < nd) { nd = d; nearest = p; }
     }
-    carrier.hasBall = false; carrier.burstTarget = null;
+    carrier.hasBall = false; carrier.burstTarget = null; carrier.route = [];
     s.ball.carrier = null;
     if (nearest) {
       nearest.hasBall = true; nearest.settlingUntil = s.tick + SETTLING_TICKS;
@@ -1036,7 +1074,7 @@ function checkOutOfBounds(s) {
     const endX = carrier.x < 0 ? 0 : 100;
     const carrierGoalX = getAttackGoalX(carrier.team, half);
     const isAttacking = Math.abs(carrierGoalX - endX) < 1;
-    carrier.hasBall = false; carrier.burstTarget = null;
+    carrier.hasBall = false; carrier.burstTarget = null; carrier.route = [];
     s.ball.carrier = null; s.passBall = null;
     if (isAttacking) {
       // Goal kick for defending team
@@ -1121,6 +1159,18 @@ function positionDefender(state, x, y) {
 
 // ==================== DRAG + THROUGH BALL (Alpha 2.0.0) ====================
 
+function setRoute(state, playerId, route) {
+  if (state.phase !== 'play') return state;
+  var player = state.players.find(function(p) { return p.id === playerId; });
+  if (!player || player.team !== 'home') return state;
+
+  var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
+  var p = s.players.find(function(pl) { return pl.id === playerId; });
+  p.route = route.map(function(w) { return { x: w.x, y: w.y }; });
+  p.burstTarget = null; // route overrides burstTarget
+  return s;
+}
+
 function dragPlayer(state, playerId, x, y) {
   if (state.phase !== 'play') return state;
   var player = state.players.find(function(p) { return p.id === playerId; });
@@ -1172,6 +1222,7 @@ function throughBall(state, x, y) {
     }
   }
   if (nearestTeammate) {
+    nearestTeammate.route = [];
     nearestTeammate.burstTarget = { x: x, y: y };
   }
 
@@ -1239,7 +1290,7 @@ function App() {
   const fieldRef = useRef(null);
   const containerRef = useRef(null);
   const [fieldDims, setFieldDims] = useState({ width: 600, height: 400 });
-  var dragRef = useRef({ active: false, playerId: null, startX: 0, startY: 0, startTime: 0 });
+  var dragRef = useRef({ active: false, isDown: false, playerId: null, startX: 0, startY: 0, startGx: 0, startGy: 0, startTime: 0, lastGx: 0, lastGy: 0, waypoints: [] });
 
   stateRef.current = gameState;
 
@@ -1327,18 +1378,23 @@ function App() {
     // Store pointer start state for tap/drag detection
     dragRef.current = {
       active: false,
+      isDown: true,
       playerId: tappedPlayer ? tappedPlayer.id : null,
       startX: px,
       startY: py,
+      startGx: gx,
+      startGy: gy,
       startTime: Date.now(),
       lastGx: gx,
       lastGy: gy,
+      waypoints: [],
     };
   }, [fieldDims]);
 
   var handleFieldPointerMove = useCallback(function(e) {
     var dr = dragRef.current;
-    if (!dr.playerId) return; // No player under finger at start
+    if (!dr.isDown) return;
+    if (!dr.playerId) return;
     if (stateRef.current.phase !== 'play') return;
 
     var rect = fieldRef.current.getBoundingClientRect();
@@ -1346,8 +1402,8 @@ function App() {
     var py = e.clientY - rect.top;
     var ppu = pixelsPerUnitRef.current;
     var ypu = fieldDims.height / 100;
-    var gx = px / ppu;
-    var gy = py / ypu;
+    var gx = Math.max(1, Math.min(99, px / ppu));
+    var gy = Math.max(1, Math.min(99, py / ypu));
 
     var movedPx = Math.sqrt(
       (px - dr.startX) * (px - dr.startX) + (py - dr.startY) * (py - dr.startY)
@@ -1359,21 +1415,44 @@ function App() {
     }
 
     if (dr.active) {
-      // Dispatch drag -- player moves to finger position
-      dispatch({ type: 'DRAG_PLAYER', playerId: dr.playerId, x: Math.max(1, Math.min(99, gx)), y: Math.max(1, Math.min(99, gy)) });
-      dr.lastGx = gx;
-      dr.lastGy = gy;
+      // Sample waypoints: only add if >3 game units from last waypoint
+      var lastWp = dr.waypoints.length > 0 ? dr.waypoints[dr.waypoints.length - 1] : { x: dr.startGx, y: dr.startGy };
+      var wpDist = Math.sqrt((gx - lastWp.x) * (gx - lastWp.x) + (gy - lastWp.y) * (gy - lastWp.y));
+      if (wpDist >= 3) {
+        dr.waypoints.push({ x: gx, y: gy });
+        // Dispatch route so player starts following and lines render
+        dispatch({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
+      }
     }
   }, [dispatch, fieldDims]);
 
   var handleFieldPointerUp = useCallback(function(e) {
     var dr = dragRef.current;
-    var state = stateRef.current;
-    if (state.phase !== 'play') { dragRef.current = { active: false, playerId: null }; return; }
+    if (!dr.isDown) return; // Absorb duplicate pointerLeave events
 
-    // If it was a drag, we're done -- movement already happened
+    var state = stateRef.current;
+    if (state.phase !== 'play') {
+      dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
+      return;
+    }
+
+    // If it was a drag, finalize the route
     if (dr.active) {
-      dragRef.current = { active: false, playerId: null };
+      // Final waypoint at release position (only if >3 units from last waypoint)
+      var rect2 = fieldRef.current.getBoundingClientRect();
+      var fpx = e.clientX - rect2.left;
+      var fpy = e.clientY - rect2.top;
+      var fppu = pixelsPerUnitRef.current;
+      var fypu = fieldDims.height / 100;
+      var fgx = Math.max(1, Math.min(99, fpx / fppu));
+      var fgy = Math.max(1, Math.min(99, fpy / fypu));
+      var lastWp2 = dr.waypoints.length > 0 ? dr.waypoints[dr.waypoints.length - 1] : { x: dr.startGx, y: dr.startGy };
+      var finalDist = Math.sqrt((fgx - lastWp2.x) * (fgx - lastWp2.x) + (fgy - lastWp2.y) * (fgy - lastWp2.y));
+      if (finalDist >= 3) {
+        dr.waypoints.push({ x: fgx, y: fgy });
+      }
+      dispatch({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
+      dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
       return;
     }
 
@@ -1389,17 +1468,19 @@ function App() {
     if (state.possession === 'home') {
       // OFFENSE TAP LOGIC
       var carrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
-      if (!carrier || carrier.team !== 'home') { dragRef.current = { active: false, playerId: null }; return; }
+      if (!carrier || carrier.team !== 'home') {
+        dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
+        return;
+      }
 
       // 1. Check if tapping the goal area to shoot
       var hGoalX = getAttackGoalX('home', state.clock.half);
       var inRange = Math.abs(hGoalX - carrier.x) <= SHOOT_RANGE_X;
-      // Goal mouth zone: last 8 game units, between the posts (y 35-65)
-      var isGoalTap = (hGoalX === 100 ? gx >= 92 : gx <= 8) && gy >= 35 && gy <= 65;
+      var isGoalTap = (hGoalX === 100 ? gx >= 85 : gx <= 15) && gy >= 35 && gy <= 65;
       if (inRange && isGoalTap) {
         AudioSys.kick();
         dispatch({ type: 'SHOOT', aimX: gx, aimY: gy });
-        dragRef.current = { active: false, playerId: null };
+        dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
         return;
       }
 
@@ -1410,7 +1491,7 @@ function App() {
       for (var i = 0; i < state.players.length; i++) {
         var p = state.players[i];
         if (p.team !== 'home') continue;
-        if (p.id === carrier.id) continue; // skip the carrier
+        if (p.id === carrier.id) continue;
         var ppx = p.x * ppu;
         var ppy = p.y * ypu;
         var dist = Math.sqrt((px - ppx) * (px - ppx) + (py - ppy) * (py - ppy));
@@ -1423,24 +1504,22 @@ function App() {
       if (tappedTeammate) {
         AudioSys.tic();
         dispatch({ type: 'TAP_PLAYER', playerId: tappedTeammate.id });
-        dragRef.current = { active: false, playerId: null };
+        dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
         return;
       }
 
-      // 3. Tap on empty field = through ball to that spot
+      // 3. Tap on empty field = through ball
       AudioSys.tic();
       dispatch({ type: 'THROUGH_BALL', x: gx, y: gy });
 
     } else if (state.possession === 'away') {
       // DEFENSE TAP LOGIC
-      // Check if tapping the ball carrier to commit tackle
       var awayCarrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
       if (awayCarrier) {
         var acx = awayCarrier.x * ppu;
         var acy = awayCarrier.y * ypu;
         var carrierDist = Math.sqrt((px - acx) * (px - acx) + (py - acy) * (py - acy));
         if (carrierDist < 48) {
-          // Find nearest home player to commit to tackle
           var nearestDefender = null;
           var nearestDefDist = Infinity;
           for (var j = 0; j < state.players.length; j++) {
@@ -1460,7 +1539,7 @@ function App() {
       }
     }
 
-    dragRef.current = { active: false, playerId: null };
+    dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
   }, [dispatch, fieldDims]);
 
   // TITLE SCREEN + LANDING PAGE
@@ -1471,7 +1550,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.0.0 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.1.0 -- test build'),
         React.createElement('button', {
           onClick: () => { AudioSys.init(); AudioSys.whistle(); dispatch({ type: 'START_GAME' }); }
         }, 'KICK OFF')
@@ -1494,16 +1573,16 @@ function App() {
         ),
         // Game Mode
         React.createElement('div', { className: 'landing-card mode-card' },
-          React.createElement('h3', null, 'Game Mode'),
+          React.createElement('h3', null, 'Live Play'),
           React.createElement('p', null,
-            React.createElement('strong', { className: 'highlight' }, 'Single and two-player'),
-            ' (on separate devices). Gets closer to realism in scoring and ball movement at higher tiers -- from Kickabout (training wheels, lots of goals) through Friendly, League Match, and Cup Final.'
+            React.createElement('strong', { className: 'highlight' }, 'Draw routes for your players in real time'),
+            ' -- they follow the path you trace. Tap to pass, tap the goal to shoot, tap empty space for a through ball. Single and two-player (on separate devices), with difficulty tiers from Kickabout (lots of goals) through Cup Final.'
           )
         ),
         // Sandbox Mode
         React.createElement('div', { className: 'landing-card mode-card' },
-          React.createElement('h3', null, 'Coaching Sandbox'),
-          React.createElement('p', null, 'Drag players into any formation and draw paths for them to run. Use it as a digital whiteboard to show positioning and movement, or hit play and run the game from that setup -- single player against the CPU or two-player. Show your players where to be, then show them why.')
+          React.createElement('h3', null, 'Tactical Mode (Coaching)'),
+          React.createElement('p', null, 'Pause the action. Draw routes for multiple players. Hit go and watch them execute. Use it as a digital whiteboard for coaching, or as a turn-based way to play -- plan your moves, then see if they work. Show your players where to be, then show them why.')
         ),
         // Personality powers
         React.createElement('p', { className: 'landing-text' },
@@ -1556,7 +1635,7 @@ function App() {
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.0.0 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.1.0 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
@@ -1586,8 +1665,8 @@ function App() {
         // Shooting range highlight
         showShootIndicator ? React.createElement('rect', {
           key: 'shoot-zone',
-          x: homeGoalX === 100 ? fw - 8 * ppu : 0, y: (50 - 15) * ypu,
-          width: 8 * ppu, height: 30 * ypu,
+          x: homeGoalX === 100 ? fw - 15 * ppu : 0, y: (50 - 15) * ypu,
+          width: 15 * ppu, height: 30 * ypu,
           fill: '#ffd700', opacity: 0.2 + 0.1 * Math.sin(gameState.tick * 0.15),
           rx: 4,
         }) : null,
@@ -1600,6 +1679,37 @@ function App() {
             fill: 'yellow', opacity: t.opacity * 0.5
           })
         ) : []),
+
+        // Route lines for players with active routes
+        ...gameState.players.filter(function(p) { return p.team === 'home' && p.route && p.route.length > 0; }).map(function(p) {
+          var points = (p.x * ppu) + ',' + (p.y * ypu);
+          for (var i = 0; i < p.route.length; i++) {
+            points += ' ' + (p.route[i].x * ppu) + ',' + (p.route[i].y * ypu);
+          }
+          return React.createElement('polyline', {
+            key: 'route-' + p.id,
+            points: points,
+            fill: 'none',
+            stroke: p.id === gameState.ball.carrier ? '#ffd700' : '#60a5fa',
+            strokeWidth: 2,
+            strokeDasharray: '6 4',
+            opacity: 0.7,
+          });
+        }),
+
+        // Route waypoint dots
+        ...gameState.players.filter(function(p) { return p.team === 'home' && p.route && p.route.length > 0; }).reduce(function(acc, p) {
+          p.route.forEach(function(wp, i) {
+            acc.push(React.createElement('circle', {
+              key: 'wp-' + p.id + '-' + i,
+              cx: wp.x * ppu, cy: wp.y * ypu,
+              r: 3,
+              fill: p.id === gameState.ball.carrier ? '#ffd700' : '#60a5fa',
+              opacity: 0.5,
+            }));
+          });
+          return acc;
+        }, []),
 
         // Player tokens
         ...gameState.players.map(p => renderPlayer(p, ppu, ypu, gameState)),

@@ -1,5 +1,15 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.1.0 (2026-02-28)
+- Waypoint route system: drag draws a path of waypoints, player follows them in sequence instead of beelining to finger position
+- Visible route lines on the field: dashed gold for ball carrier, blue for other home players, with small dots at each waypoint
+- isDown flag on dragRef prevents double-event (pointerUp + pointerLeave) from firing phantom through balls on drag release
+- Shot zone widened back to 15 game units on X axis (was 8) -- fixes untappable zone on phones and prevents "through ball to goalkeeper" problem
+- Route cleanup: through ball overrides route, tackle clears route, OOB clears route, shot clears route; pass intentionally does NOT clear passer's route (pass-and-move)
+- Players on routes skip drift movement to prevent jittery path-following
+- Landing page text: "Game Mode" renamed to "Live Play", "Coaching Sandbox" renamed to "Tactical Mode (Coaching)", descriptions updated
+- Version updated to Alpha 2.1.0
+
 ## Alpha 2.0.0 (2026-02-28)
 - Major control scheme rewrite: tap-only replaced with tap + drag
 - Drag any home player to move her (works on offense and defense) -- replaces tap-to-run and two-tap defense system
