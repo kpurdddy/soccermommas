@@ -635,8 +635,8 @@ function checkTackles(s) {
       var dy = p.y - carrier.y;
       var awayDist = Math.sqrt(dx * dx + dy * dy) || 1;
       p.burstTarget = {
-        x: Math.max(1, Math.min(99, p.x + (dx / awayDist) * 5)),
-        y: Math.max(1, Math.min(99, p.y + (dy / awayDist) * 5))
+        x: Math.max(1, Math.min(99, p.x + (dx / awayDist) * 6.5)),
+        y: Math.max(1, Math.min(99, p.y + (dy / awayDist) * 6.5))
       };
 
       return s;
@@ -1576,7 +1576,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.2.1 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.2.2 -- test build'),
         React.createElement('button', {
           onClick: () => { AudioSys.init(); AudioSys.whistle(); dispatch({ type: 'START_GAME' }); }
         }, 'KICK OFF')
@@ -1661,7 +1661,7 @@ function App() {
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.2.1 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.2.2 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
