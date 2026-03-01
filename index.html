@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Soccer Mamas</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <style>
@@ -161,6 +162,108 @@ var gameRNG = createPRNG(Date.now());
 
 function reseedRNG(seed) {
   gameRNG = createPRNG(seed);
+}
+
+// ==================== NETWORK MODULE ====================
+var localTeam = 'home';
+
+var netState = {
+  peer: null,
+  conn: null,
+  isHost: false,
+  isMultiplayer: false,
+  roomCode: null,
+  connected: false,
+  disconnectTimer: null,
+};
+
+function generateRoomCode() {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+function hostGame(onCode, onConnected, onData, onDisconnect) {
+  var code = generateRoomCode();
+  netState.roomCode = code;
+  netState.isHost = true;
+  netState.isMultiplayer = true;
+  localTeam = 'home';
+  onCode(code);
+
+  var peer = new Peer('soccermamas-' + code);
+  netState.peer = peer;
+
+  peer.on('open', function() {
+    // Waiting for joiner
+  });
+
+  peer.on('connection', function(conn) {
+    netState.conn = conn;
+    conn.on('open', function() {
+      netState.connected = true;
+      var seed = Date.now();
+      conn.send(JSON.stringify({ type: '__SEED__', seed: seed }));
+      reseedRNG(seed);
+      onConnected();
+    });
+    conn.on('data', function(data) {
+      var msg = JSON.parse(data);
+      if (msg.type !== '__SEED__') {
+        onData(msg);
+      }
+    });
+    conn.on('close', function() {
+      netState.connected = false;
+      onDisconnect();
+    });
+  });
+
+  peer.on('error', function(err) {
+    console.error('PeerJS host error:', err);
+  });
+}
+
+function joinGame(code, onConnected, onData, onDisconnect) {
+  netState.roomCode = code;
+  netState.isHost = false;
+  netState.isMultiplayer = true;
+  localTeam = 'away';
+
+  var peer = new Peer();
+  netState.peer = peer;
+
+  peer.on('open', function() {
+    var conn = peer.connect('soccermamas-' + code);
+    netState.conn = conn;
+    conn.on('open', function() {
+      netState.connected = true;
+    });
+    conn.on('data', function(data) {
+      var msg = JSON.parse(data);
+      if (msg.type === '__SEED__') {
+        reseedRNG(msg.seed);
+        onConnected();
+      } else {
+        onData(msg);
+      }
+    });
+    conn.on('close', function() {
+      netState.connected = false;
+      onDisconnect();
+    });
+  });
+
+  peer.on('error', function(err) {
+    console.error('PeerJS join error:', err);
+  });
+}
+
+function cleanupNet() {
+  if (netState.conn) { netState.conn.close(); netState.conn = null; }
+  if (netState.peer) { netState.peer.destroy(); netState.peer = null; }
+  netState.connected = false;
+  netState.isMultiplayer = false;
+  netState.roomCode = null;
+  localTeam = 'home';
 }
 
 function getDist(x1, y1, x2, y2) {
@@ -677,6 +780,7 @@ function updateLooseBall(s) {
 }
 
 function cpuPossession(s) {
+  if (netState.isMultiplayer && s.possession === 'away') return s;
   if (s.possession !== 'away') return s;
   if (!s.ball.carrier || !s.ball.carrier.startsWith('away')) return s;
   if (s.passBall || s.ball.loose) return s;
@@ -1128,11 +1232,10 @@ function checkOutOfBounds(s) {
 
 function tapDefender(state, playerId) {
   if (state.phase !== 'play') return state;
-  if (state.possession !== 'away') return state;
   if (state.ball.loose) return state;
 
   const defender = state.players.find(p => p.id === playerId);
-  if (!defender || defender.team !== 'home') return state;
+  if (!defender) return state;
   if (defender.burstCooldownUntil > state.tick) return state;
 
   const carrier = state.players.find(p => p.id === state.ball.carrier);
@@ -1181,7 +1284,7 @@ function positionDefender(state, x, y) {
 function setRoute(state, playerId, route) {
   if (state.phase !== 'play') return state;
   var player = state.players.find(function(p) { return p.id === playerId; });
-  if (!player || player.team !== 'home') return state;
+  if (!player) return state;
 
   var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
   var p = s.players.find(function(pl) { return pl.id === playerId; });
@@ -1200,7 +1303,7 @@ function setRoute(state, playerId, route) {
 function dragPlayer(state, playerId, x, y) {
   if (state.phase !== 'play') return state;
   var player = state.players.find(function(p) { return p.id === playerId; });
-  if (!player || player.team !== 'home') return state;
+  if (!player) return state;
 
   var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
   var p = s.players.find(function(pl) { return pl.id === playerId; });
@@ -1210,12 +1313,13 @@ function dragPlayer(state, playerId, x, y) {
 
 function throughBall(state, x, y) {
   if (state.phase !== 'play') return state;
-  if (state.possession !== 'home') return state;
   if (state.passBall) return state;
 
   var carrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
-  if (!carrier || carrier.team !== 'home') return state;
+  if (!carrier) return state;
   if (carrier.settlingUntil > state.tick) return state;
+
+  var team = carrier.team;
 
   // Start through ball -- ball goes to the tapped position
   var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
@@ -1229,16 +1333,16 @@ function throughBall(state, x, y) {
     toId: null,
     targetPos: { x: x, y: y },
     x: c.x, y: c.y,
-    trail: [], fromTeam: 'home',
+    trail: [], fromTeam: team,
     passId: s.passIdCounter, checkedBy: new Set(),
   };
 
-  // Nearest home teammate (not the carrier) runs toward the target spot
+  // Nearest teammate (not the carrier) runs toward the target spot
   var nearestTeammate = null;
   var nearestDist = Infinity;
   for (var i = 0; i < s.players.length; i++) {
     var p = s.players[i];
-    if (p.team !== 'home') continue;
+    if (p.team !== team) continue;
     if (p.id === carrier.id) continue;
     if (p.role === 'GK') continue;
     var dist = getDist(p.x, p.y, x, y);
@@ -1259,14 +1363,13 @@ function throughBall(state, x, y) {
 
 function tapPlayer(state, playerId) {
   if (state.phase !== 'play') return state;
-  if (state.possession !== 'home') return state;
   if (state.passBall) return state; // ball in flight
 
   const target = state.players.find(p => p.id === playerId);
-  if (!target || target.team !== 'home') return state;
+  if (!target) return state;
 
   const carrier = state.players.find(p => p.id === state.ball.carrier);
-  if (!carrier || carrier.team !== 'home') return state;
+  if (!carrier || carrier.team !== target.team) return state;
   if (carrier.settlingUntil > state.tick) return state; // settling
   if (target.id === carrier.id) return state; // can't pass to self
 
@@ -1281,7 +1384,7 @@ function tapPlayer(state, playerId) {
     fromX: c.x, fromY: c.y,
     toId: target.id, targetPos: null,
     x: c.x, y: c.y,
-    trail: [], fromTeam: 'home',
+    trail: [], fromTeam: carrier.team,
     passId: s.passIdCounter, checkedBy: new Set(),
   };
 
@@ -1290,11 +1393,10 @@ function tapPlayer(state, playerId) {
 
 function tapField(state, x, y) {
   if (state.phase !== 'play') return state;
-  if (state.possession !== 'home') return state;
   if (state.passBall) return state;
 
   const carrier = state.players.find(p => p.id === state.ball.carrier);
-  if (!carrier || carrier.team !== 'home') return state;
+  if (!carrier) return state;
   if (carrier.settlingUntil > state.tick) return state;
   if (carrier.burstCooldownUntil > state.tick) return state;
   if (carrier.role === 'GK') return state; // GK can't burst
@@ -1317,6 +1419,9 @@ function App() {
   const containerRef = useRef(null);
   const [fieldDims, setFieldDims] = useState({ width: 600, height: 400 });
   var dragRef = useRef({ active: false, isDown: false, playerId: null, startX: 0, startY: 0, startGx: 0, startGy: 0, startTime: 0, lastGx: 0, lastGy: 0, waypoints: [] });
+  const [titleMode, setTitleMode] = useState('menu'); // 'menu', 'hosting', 'joining', 'disconnected'
+  const [roomCode, setRoomCode] = useState('');
+  const [joinCode, setJoinCode] = useState('');
 
   stateRef.current = gameState;
 
@@ -1371,6 +1476,49 @@ function App() {
     setGameState(prev => updateGame(prev, action));
   }, []);
 
+  var dispatchAndSend = useCallback(function(action) {
+    dispatch(action);
+    if (netState.isMultiplayer && netState.connected) {
+      netState.conn.send(JSON.stringify(action));
+    }
+  }, [dispatch]);
+
+  var startSoloGame = useCallback(function() {
+    localTeam = 'home';
+    netState.isMultiplayer = false;
+    AudioSys.init();
+    AudioSys.whistle();
+    dispatch({ type: 'START_GAME' });
+  }, [dispatch]);
+
+  var startHostGame = useCallback(function() {
+    AudioSys.init();
+    setTitleMode('hosting');
+    hostGame(
+      function onCode(code) { setRoomCode(code); },
+      function onConnected() {
+        AudioSys.whistle();
+        dispatch({ type: 'START_GAME' });
+      },
+      function onData(msg) { dispatch(msg); },
+      function onDisconnect() { setTitleMode('disconnected'); }
+    );
+  }, [dispatch]);
+
+  var startJoinGame = useCallback(function() {
+    AudioSys.init();
+    setTitleMode('joining');
+    joinGame(
+      joinCode,
+      function onConnected() {
+        AudioSys.whistle();
+        dispatch({ type: 'START_GAME' });
+      },
+      function onData(msg) { dispatch(msg); },
+      function onDisconnect() { setTitleMode('disconnected'); }
+    );
+  }, [dispatch, joinCode]);
+
   var handleFieldPointerDown = useCallback(function(e) {
     AudioSys.init();
     var state = stateRef.current;
@@ -1385,13 +1533,13 @@ function App() {
     var gx = px / ppu;
     var gy = py / ypu;
 
-    // Find if a home player is under the finger
+    // Find if a local team player is under the finger
     var tapRadius = 48;
     var tappedPlayer = null;
     var minDist = Infinity;
     for (var i = 0; i < state.players.length; i++) {
       var p = state.players[i];
-      if (p.team !== 'home') continue;
+      if (p.team !== localTeam) continue;
       var ppx = p.x * ppu;
       var ppy = p.y * ypu;
       var dist = Math.sqrt((px - ppx) * (px - ppx) + (py - ppy) * (py - ppy));
@@ -1447,10 +1595,10 @@ function App() {
       if (wpDist >= 3) {
         dr.waypoints.push({ x: gx, y: gy });
         // Dispatch route so player starts following and lines render
-        dispatch({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
+        dispatchAndSend({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
       }
     }
-  }, [dispatch, fieldDims]);
+  }, [dispatchAndSend, fieldDims]);
 
   var handleFieldPointerUp = useCallback(function(e) {
     var dr = dragRef.current;
@@ -1477,7 +1625,7 @@ function App() {
       if (finalDist >= 3) {
         dr.waypoints.push({ x: fgx, y: fgy });
       }
-      dispatch({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
+      dispatchAndSend({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
       dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
       return;
     }
@@ -1491,32 +1639,32 @@ function App() {
     var gx = px / ppu;
     var gy = py / ypu;
 
-    if (state.possession === 'home') {
+    if (state.possession === localTeam) {
       // OFFENSE TAP LOGIC
       var carrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
-      if (!carrier || carrier.team !== 'home') {
+      if (!carrier || carrier.team !== localTeam) {
         dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
         return;
       }
 
       // 1. Check if tapping the goal area to shoot
-      var hGoalX = getAttackGoalX('home', state.clock.half);
+      var hGoalX = getAttackGoalX(localTeam, state.clock.half);
       var inRange = Math.abs(hGoalX - carrier.x) <= SHOOT_RANGE_X;
       var isGoalTap = (hGoalX === 100 ? gx >= 85 : gx <= 15) && gy >= 35 && gy <= 65;
       if (inRange && isGoalTap) {
         AudioSys.kick();
-        dispatch({ type: 'SHOOT', aimX: gx, aimY: gy });
+        dispatchAndSend({ type: 'SHOOT', aimX: gx, aimY: gy });
         dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
         return;
       }
 
-      // 2. Check if tapping a home teammate to pass
+      // 2. Check if tapping a teammate to pass
       var tapRadius = 48;
       var tappedTeammate = null;
       var minDist = Infinity;
       for (var i = 0; i < state.players.length; i++) {
         var p = state.players[i];
-        if (p.team !== 'home') continue;
+        if (p.team !== localTeam) continue;
         if (p.id === carrier.id) continue;
         var ppx = p.x * ppu;
         var ppy = p.y * ypu;
@@ -1529,29 +1677,29 @@ function App() {
 
       if (tappedTeammate) {
         AudioSys.tic();
-        dispatch({ type: 'TAP_PLAYER', playerId: tappedTeammate.id });
+        dispatchAndSend({ type: 'TAP_PLAYER', playerId: tappedTeammate.id });
         dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
         return;
       }
 
       // 3. Tap on empty field = through ball
       AudioSys.tic();
-      dispatch({ type: 'THROUGH_BALL', x: gx, y: gy });
+      dispatchAndSend({ type: 'THROUGH_BALL', x: gx, y: gy });
 
-    } else if (state.possession === 'away') {
+    } else if (state.possession !== localTeam) {
       // DEFENSE TAP LOGIC
-      var awayCarrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
-      if (awayCarrier) {
-        var acx = awayCarrier.x * ppu;
-        var acy = awayCarrier.y * ypu;
+      var oppCarrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
+      if (oppCarrier) {
+        var acx = oppCarrier.x * ppu;
+        var acy = oppCarrier.y * ypu;
         var carrierDist = Math.sqrt((px - acx) * (px - acx) + (py - acy) * (py - acy));
         if (carrierDist < 48) {
           var nearestDefender = null;
           var nearestDefDist = Infinity;
           for (var j = 0; j < state.players.length; j++) {
             var d = state.players[j];
-            if (d.team !== 'home') continue;
-            var ddist = getDist(d.x, d.y, awayCarrier.x, awayCarrier.y);
+            if (d.team !== localTeam) continue;
+            var ddist = getDist(d.x, d.y, oppCarrier.x, oppCarrier.y);
             if (ddist < nearestDefDist) {
               nearestDefDist = ddist;
               nearestDefender = d;
@@ -1559,14 +1707,14 @@ function App() {
           }
           if (nearestDefender) {
             AudioSys.tic();
-            dispatch({ type: 'TAP_DEFENDER', playerId: nearestDefender.id });
+            dispatchAndSend({ type: 'TAP_DEFENDER', playerId: nearestDefender.id });
           }
         }
       }
     }
 
     dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
-  }, [dispatch, fieldDims]);
+  }, [dispatchAndSend, fieldDims]);
 
   // TITLE SCREEN + LANDING PAGE
   if (gameState.phase === 'title') {
@@ -1576,10 +1724,50 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.2.2 -- test build'),
-        React.createElement('button', {
-          onClick: () => { AudioSys.init(); AudioSys.whistle(); dispatch({ type: 'START_GAME' }); }
-        }, 'KICK OFF')
+        React.createElement('div', { className: 'version' }, 'Alpha 2.3.0 -- test build'),
+        titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
+          React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
+          React.createElement('button', {
+            onClick: startHostGame,
+            style: { background: '#2563eb' }
+          }, 'HOST GAME'),
+          React.createElement('button', {
+            onClick: function() { setTitleMode('join_input'); },
+            style: { background: '#7c3aed' }
+          }, 'JOIN GAME')
+        ) : null,
+        titleMode === 'hosting' ? React.createElement('div', { style: { textAlign: 'center' } },
+          React.createElement('div', { style: { fontSize: '1.1em', color: '#ccc', marginBottom: '16px' } }, 'Waiting for Player 2...'),
+          React.createElement('div', { style: { fontSize: '3em', fontWeight: 'bold', color: '#ffd700', letterSpacing: '8px', fontFamily: 'monospace' } }, roomCode),
+          React.createElement('div', { style: { fontSize: '0.9em', color: '#888', marginTop: '12px' } }, 'Share this code with your opponent')
+        ) : null,
+        titleMode === 'join_input' ? React.createElement('div', { style: { textAlign: 'center' } },
+          React.createElement('div', { style: { fontSize: '1.1em', color: '#ccc', marginBottom: '12px' } }, 'Enter room code:'),
+          React.createElement('input', {
+            type: 'text', inputMode: 'numeric', maxLength: 4,
+            value: joinCode,
+            onChange: function(e) { setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 4)); },
+            style: { fontSize: '2em', width: '140px', textAlign: 'center', letterSpacing: '8px',
+              fontFamily: 'monospace', padding: '8px', borderRadius: '8px', border: '2px solid #7c3aed',
+              background: '#1a1a2e', color: 'white' }
+          }),
+          React.createElement('div', { style: { marginTop: '12px' } },
+            React.createElement('button', {
+              onClick: startJoinGame,
+              disabled: joinCode.length !== 4,
+              style: { background: joinCode.length === 4 ? '#7c3aed' : '#555', cursor: joinCode.length === 4 ? 'pointer' : 'default' }
+            }, 'CONNECT')
+          )
+        ) : null,
+        titleMode === 'joining' ? React.createElement('div', { style: { textAlign: 'center', color: '#ccc' } },
+          'Connecting to room ' + joinCode + '...'
+        ) : null,
+        titleMode === 'disconnected' ? React.createElement('div', { style: { textAlign: 'center' } },
+          React.createElement('div', { style: { color: '#ff6b6b', fontSize: '1.1em', marginBottom: '12px' } }, 'Connection lost'),
+          React.createElement('button', {
+            onClick: function() { cleanupNet(); setTitleMode('menu'); dispatch({ type: 'PLAY_AGAIN' }); }
+          }, 'BACK TO MENU')
+        ) : null
       ),
       React.createElement('div', { className: 'landing-content' },
         // Feedback section
@@ -1652,16 +1840,16 @@ function App() {
   const halfStr = gameState.clock.half === 1 ? '1st Half' : '2nd Half';
 
   // Shooting range check for visual indicator
-  const homeGoalX = getAttackGoalX('home', gameState.clock.half);
-  const homeCarrier = gameState.possession === 'home' && gameState.ball.carrier
+  const localGoalX = getAttackGoalX(localTeam, gameState.clock.half);
+  const localCarrier = gameState.possession === localTeam && gameState.ball.carrier
     ? gameState.players.find(p => p.id === gameState.ball.carrier) : null;
-  const showShootIndicator = homeCarrier && Math.abs(homeGoalX - homeCarrier.x) <= SHOOT_RANGE_X;
+  const showShootIndicator = localCarrier && Math.abs(localGoalX - localCarrier.x) <= SHOOT_RANGE_X;
 
   return React.createElement('div', { className: 'game-container', ref: containerRef },
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.2.2 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.3.0 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
@@ -1691,7 +1879,7 @@ function App() {
         // Shooting range highlight
         showShootIndicator ? React.createElement('rect', {
           key: 'shoot-zone',
-          x: homeGoalX === 100 ? fw - 15 * ppu : 0, y: (50 - 15) * ypu,
+          x: localGoalX === 100 ? fw - 15 * ppu : 0, y: (50 - 15) * ypu,
           width: 15 * ppu, height: 30 * ypu,
           fill: '#ffd700', opacity: 0.2 + 0.1 * Math.sin(gameState.tick * 0.15),
           rx: 4,
@@ -1707,7 +1895,7 @@ function App() {
         ) : []),
 
         // Route lines for players with active routes
-        ...gameState.players.filter(function(p) { return p.team === 'home' && p.route && p.route.length > 0; }).map(function(p) {
+        ...gameState.players.filter(function(p) { return p.team === localTeam && p.route && p.route.length > 0; }).map(function(p) {
           var points = (p.x * ppu) + ',' + (p.y * ypu);
           for (var i = 0; i < p.route.length; i++) {
             points += ' ' + (p.route[i].x * ppu) + ',' + (p.route[i].y * ypu);
@@ -1724,7 +1912,7 @@ function App() {
         }),
 
         // Route waypoint dots
-        ...gameState.players.filter(function(p) { return p.team === 'home' && p.route && p.route.length > 0; }).reduce(function(acc, p) {
+        ...gameState.players.filter(function(p) { return p.team === localTeam && p.route && p.route.length > 0; }).reduce(function(acc, p) {
           p.route.forEach(function(wp, i) {
             acc.push(React.createElement('circle', {
               key: 'wp-' + p.id + '-' + i,
@@ -1879,8 +2067,8 @@ function App() {
         }, gameState.score.home + ' \u2014 ' + gameState.score.away),
         React.createElement('div', {
           style: { fontSize: Math.max(18, fw * 0.035) + 'px', color: '#ffd700', marginBottom: '24px' }
-        }, gameState.score.home > gameState.score.away ? 'You Win!' :
-           gameState.score.away > gameState.score.home ? 'You Lose!' : 'Draw!'),
+        }, gameState.score.home > gameState.score.away ? (localTeam === 'home' ? 'You Win!' : 'You Lose!') :
+           gameState.score.away > gameState.score.home ? (localTeam === 'away' ? 'You Win!' : 'You Lose!') : 'Draw!'),
         React.createElement('button', {
           style: { fontSize: '1.2em', padding: '12px 36px', background: '#27ae60', color: 'white',
             border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' },

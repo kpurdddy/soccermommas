@@ -1,5 +1,22 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.3.0 (2026-03-01)
+- Two-player local WiFi via PeerJS WebRTC: Host Game shows 4-digit room code, Join Game connects with code
+- Title screen now offers Play Solo, Host Game, and Join Game (replaces single Kick Off button)
+- Team-aware input routing: localTeam variable controls which team the player interacts with (home for host/solo, away for joiner)
+- Action transmission: player-initiated actions (pass, shoot, through ball, route, tackle) sent to remote peer via dispatchAndSend helper
+- CPU possession disabled for away team in multiplayer mode so human player controls it
+- Reducer functions (tapPlayer, tapField, throughBall, tapDefender, setRoute, dragPlayer) made team-agnostic to accept actions from either team
+- Seeded PRNG reseed on connection: host generates shared seed, both phones call reseedRNG for deterministic simulation
+- Disconnect handling: connection loss shows error and returns to menu
+- Shoot indicator, route lines, and win/lose text all use localTeam instead of hardcoded 'home'
+- Version updated to Alpha 2.3.0
+
+## Alpha 2.2.2 (2026-02-28)
+- Tackle burst distance adjusted from 5 to 6.5 game units -- tackler separates enough to avoid congestion but stays in the area for a natural takeover feel
+- Role labels on player tokens: all 22 players now show two-letter abbreviations (GK, LB, CB, RB, LM, CM, RM, ST) centered inside their circles in white bold text
+- Version updated to Alpha 2.2.2
+
 ## Alpha 2.2.1 (2026-02-28)
 - Shooting range expanded from 25 to 45 game units -- players can now attempt long-range shots instead of silently getting through balls; distance factor still punishes long shots with high scatter and low goal chance
 - Tackle burst distance reduced from 8 to 5 game units -- tackler no longer flies away after winning the ball, looks like a natural takeover
