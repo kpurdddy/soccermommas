@@ -1,5 +1,10 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.2.1 (2026-02-28)
+- Shooting range expanded from 25 to 45 game units -- players can now attempt long-range shots instead of silently getting through balls; distance factor still punishes long shots with high scatter and low goal chance
+- Tackle burst distance reduced from 8 to 5 game units -- tackler no longer flies away after winning the ball, looks like a natural takeover
+- Version updated to Alpha 2.2.1
+
 ## Alpha 2.2.0 (2026-02-28)
 - Drift tether fix: increased HOME_PULL multiplier from 0.3 to 1.5 so players hold position near where you place them via route drawing instead of sliding toward the goal
 - Seeded PRNG: replaced all 20 Math.random() calls with a deterministic mulberry32 PRNG (gameRNG). Seeded with Date.now() for normal play; reseedRNG(seed) function added for future two-player shared-seed mode

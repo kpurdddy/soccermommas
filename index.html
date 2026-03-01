@@ -135,7 +135,7 @@ const GK_HOME_X_MAX = 8;
 const GK_AWAY_X_MIN = 92;
 const GK_AWAY_X_MAX = 98;
 const LOOSE_BALL_TICKS = 10; // 300ms
-const SHOOT_RANGE_X = 25;
+const SHOOT_RANGE_X = 45;
 const GOAL_CELEBRATION_TICKS = 45; // 1.5s
 const KICKOFF_PAUSE_TICKS = 30; // 1s
 const CPU_STRATEGY_INTERVAL = 60; // ~2 seconds
@@ -635,8 +635,8 @@ function checkTackles(s) {
       var dy = p.y - carrier.y;
       var awayDist = Math.sqrt(dx * dx + dy * dy) || 1;
       p.burstTarget = {
-        x: Math.max(1, Math.min(99, p.x + (dx / awayDist) * 8)),
-        y: Math.max(1, Math.min(99, p.y + (dy / awayDist) * 8))
+        x: Math.max(1, Math.min(99, p.x + (dx / awayDist) * 5)),
+        y: Math.max(1, Math.min(99, p.y + (dy / awayDist) * 5))
       };
 
       return s;
@@ -1576,7 +1576,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.2.0 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.2.1 -- test build'),
         React.createElement('button', {
           onClick: () => { AudioSys.init(); AudioSys.whistle(); dispatch({ type: 'START_GAME' }); }
         }, 'KICK OFF')
@@ -1661,7 +1661,7 @@ function App() {
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.2.0 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.2.1 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
