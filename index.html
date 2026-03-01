@@ -876,13 +876,14 @@ function executeShot(state, carrierId, aimX, aimY) {
     targetY = clampedAimY > 50 ? 65 + Math.random() * 10 : 35 - Math.random() * 10;
   }
 
-  // If save: redirect ball target to keeper position so ball visibly stops at keeper
+  // If save: stop ball at keeper's depth (X) but keep aimed direction (Y)
+  // so keeper has to dive to intercept
   if (result === 'save') {
     var saveKeeperId = shootingTeam === 'home' ? 'away_0' : 'home_0';
     var saveKeeper = s.players.find(function(p) { return p.id === saveKeeperId; });
     if (saveKeeper) {
       targetX = saveKeeper.x;
-      targetY = saveKeeper.y;
+      // targetY stays as the player's aimed position -- keeper dives to it
     }
   }
 
@@ -1558,7 +1559,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.1.1 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.1.2 -- test build'),
         React.createElement('button', {
           onClick: () => { AudioSys.init(); AudioSys.whistle(); dispatch({ type: 'START_GAME' }); }
         }, 'KICK OFF')
@@ -1643,7 +1644,7 @@ function App() {
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.1.1 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.1.2 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },

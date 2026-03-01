@@ -1,5 +1,9 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.1.2 (2026-02-28)
+- Fix magnetic goalie: removed targetY override on saves so the ball travels where the player aimed, not directly at the keeper; keeper now visibly dives to intercept using existing interpolation logic
+- Version updated to Alpha 2.1.2
+
 ## Alpha 2.1.1 (2026-02-28)
 - Fix rubber-banding: route endpoint now rewrites homeX/homeY for outfield players so they stay where you put them instead of snapping back to formation
 - Fix GK route: moved route/burstTarget checks above GK clamp block in driftPlayers so keepers can follow drawn routes; when route ends, keeper drifts back to goal naturally
