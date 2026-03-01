@@ -146,6 +146,23 @@ const HALF_REAL_S = 180; // 3 real minutes per half
 const GAME_TIME_SCALE = 15; // 1 real second = 15 game seconds
 const OOB_PAUSE_TICKS = 15; // 0.5s
 
+// ==================== SEEDED PRNG (mulberry32) ====================
+function createPRNG(seed) {
+  var state = seed;
+  return function() {
+    state = (state + 0x6D2B79F5) | 0;
+    var t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+var gameRNG = createPRNG(Date.now());
+
+function reseedRNG(seed) {
+  gameRNG = createPRNG(seed);
+}
+
 function getDist(x1, y1, x2, y2) {
   return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2);
 }
@@ -418,7 +435,7 @@ function updatePassBall(s) {
     if (pb.checkedBy.has(p.id)) continue;
     pb.checkedBy.add(p.id);
 
-    if (Math.random() < getInterceptionChance(pDist)) {
+    if (gameRNG() < getInterceptionChance(pDist)) {
       p.hasBall = true;
       p.settlingUntil = s.tick + SETTLING_TICKS;
       s.ball.carrier = p.id;
@@ -484,19 +501,19 @@ function driftPlayers(s) {
       driftY = (toBallY / toBallD) * DRIFT_SPEED * 0.15;
     } else {
       driftX = DRIFT_SPEED * 0.4 * attackDir;
-      driftY = (Math.random() - 0.5) * DRIFT_SPEED * 0.2;
+      driftY = (gameRNG() - 0.5) * DRIFT_SPEED * 0.2;
     }
 
     p.x += driftX;
     p.y += driftY;
 
-    const pullX = (p.homeX - p.x) * HOME_PULL * 0.3;
-    const pullY = (p.homeY - p.y) * HOME_PULL * 0.3;
+    const pullX = (p.homeX - p.x) * HOME_PULL * 1.5;
+    const pullY = (p.homeY - p.y) * HOME_PULL * 1.5;
     p.x += pullX;
     p.y += pullY;
 
-    p.x += (Math.random() - 0.5) * 0.04;
-    p.y += (Math.random() - 0.5) * 0.04;
+    p.x += (gameRNG() - 0.5) * 0.04;
+    p.y += (gameRNG() - 0.5) * 0.04;
   }
 
   return s;
@@ -561,8 +578,8 @@ function attachBallToCarrier(s) {
     if (carrier) {
       if (carrier.settlingUntil > s.tick) {
         // Settling jitter
-        s.ball.x = carrier.x + (Math.random() - 0.5) * 0.6;
-        s.ball.y = carrier.y + (Math.random() - 0.5) * 0.6;
+        s.ball.x = carrier.x + (gameRNG() - 0.5) * 0.6;
+        s.ball.y = carrier.y + (gameRNG() - 0.5) * 0.6;
       } else {
         s.ball.x = carrier.x;
         s.ball.y = carrier.y;
@@ -594,7 +611,7 @@ function checkTackles(s) {
     if (p.cooldownUntil > s.tick) continue;
     const d = getDist(p.x, p.y, carrier.x, carrier.y);
     if (d > 3) continue;
-    if (Math.random() < getTackleChance(d)) {
+    if (gameRNG() < getTackleChance(d)) {
       // Tackle successful -- ball goes directly to tackler
       carrier.hasBall = false;
       carrier.burstTarget = null;
@@ -681,7 +698,7 @@ function cpuPossession(s) {
       // Reactive: shoot if possible, else pass
       if (canCpuShoot(s, carrier)) {
         var cpuAimX1 = getAttackGoalX('away', s.clock.half);
-        var cpuAimY1 = 38 + Math.random() * 24;
+        var cpuAimY1 = 38 + gameRNG() * 24;
         return executeShot(s, carrier.id, cpuAimX1, cpuAimY1);
       }
       return cpuPass(s, carrier, 'reactive');
@@ -694,13 +711,13 @@ function cpuPossession(s) {
   if (!hasThreat && s.tick >= (s.cpuNextStrategyTick || 0)) {
     s.cpuNextStrategyTick = s.tick + CPU_STRATEGY_INTERVAL;
 
-    if (canCpuShoot(s, carrier) && Math.random() < 0.30) {
+    if (canCpuShoot(s, carrier) && gameRNG() < 0.30) {
       var cpuAimX2 = getAttackGoalX('away', s.clock.half);
-      var cpuAimY2 = 38 + Math.random() * 24;
+      var cpuAimY2 = 38 + gameRNG() * 24;
       return executeShot(s, carrier.id, cpuAimX2, cpuAimY2);
     }
 
-    const roll = Math.random();
+    const roll = gameRNG();
     if (roll < 0.70) {
       return cpuPass(s, carrier, 'forward');
     } else if (roll < 0.90) {
@@ -710,7 +727,7 @@ function cpuPossession(s) {
         const bdir = getAttackGoalX('away', s.clock.half) > 50 ? 1 : -1;
         carrier.burstTarget = {
           x: Math.max(1, Math.min(99, carrier.x + bdir * 15)),
-          y: Math.max(1, Math.min(99, carrier.y + (Math.random() - 0.5) * 10))
+          y: Math.max(1, Math.min(99, carrier.y + (gameRNG() - 0.5) * 10))
         };
       }
       return s;
@@ -774,10 +791,10 @@ function cpuPass(s, carrier, type) {
   s.ball.carrier = null;
   s.passIdCounter = (s.passIdCounter || 0) + 1;
 
-  var isErrant = Math.random() < CPU_PASS_ERROR_CHANCE;
+  var isErrant = gameRNG() < CPU_PASS_ERROR_CHANCE;
   if (isErrant) {
-    const angle = Math.random() * Math.PI * 2;
-    const errDist = 2 + Math.random();
+    const angle = gameRNG() * Math.PI * 2;
+    const errDist = 2 + gameRNG();
     s.passBall = {
       fromX: carrier.x, fromY: carrier.y,
       toId: null,
@@ -823,7 +840,7 @@ function executeShot(state, carrierId, aimX, aimY) {
 
   // Apply scatter based on distance
   var scatterRange = Math.max(0, (distToGoal - 5) * 0.15);
-  var targetY = clampedAimY + (Math.random() - 0.5) * scatterRange;
+  var targetY = clampedAimY + (gameRNG() - 0.5) * scatterRange;
 
   // Distance factor: 50% at 5 units, 5% at 25 units
   var distFactor;
@@ -864,7 +881,7 @@ function executeShot(state, carrierId, aimX, aimY) {
 
   // Normalize: goal chance, then save, then wide
   var goalChance = baseChance;
-  var roll = Math.random();
+  var roll = gameRNG();
 
   var result;
   if (roll < goalChance) result = 'goal';
@@ -873,7 +890,7 @@ function executeShot(state, carrierId, aimX, aimY) {
 
   // Adjust targetY based on result
   if (result === 'wide') {
-    targetY = clampedAimY > 50 ? 65 + Math.random() * 10 : 35 - Math.random() * 10;
+    targetY = clampedAimY > 50 ? 65 + gameRNG() * 10 : 35 - gameRNG() * 10;
   }
 
   // If save: stop ball at keeper's depth (X) but keep aimed direction (Y)
@@ -930,7 +947,7 @@ function updateShotAnimation(state) {
     } else if (s.shot.result === 'save') {
       var reboundX = s.shot.targetX < 50 ? 10 : 90;
       s.ball.x = reboundX;
-      s.ball.y = 40 + Math.random() * 20;
+      s.ball.y = 40 + gameRNG() * 20;
       s.ball.loose = true;
       s.ball.looseTimer = s.tick + LOOSE_BALL_TICKS;
       s.ball.lastCarrierId = null;
@@ -1559,7 +1576,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.1.2 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.2.0 -- test build'),
         React.createElement('button', {
           onClick: () => { AudioSys.init(); AudioSys.whistle(); dispatch({ type: 'START_GAME' }); }
         }, 'KICK OFF')
@@ -1644,7 +1661,7 @@ function App() {
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.1.2 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.2.0 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },

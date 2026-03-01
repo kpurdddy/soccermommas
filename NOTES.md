@@ -1,5 +1,10 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.2.0 (2026-02-28)
+- Drift tether fix: increased HOME_PULL multiplier from 0.3 to 1.5 so players hold position near where you place them via route drawing instead of sliding toward the goal
+- Seeded PRNG: replaced all 20 Math.random() calls with a deterministic mulberry32 PRNG (gameRNG). Seeded with Date.now() for normal play; reseedRNG(seed) function added for future two-player shared-seed mode
+- Version updated to Alpha 2.2.0
+
 ## Alpha 2.1.2 (2026-02-28)
 - Fix magnetic goalie: removed targetY override on saves so the ball travels where the player aimed, not directly at the keeper; keeper now visibly dives to intercept using existing interpolation logic
 - Version updated to Alpha 2.1.2
