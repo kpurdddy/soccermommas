@@ -1463,11 +1463,18 @@ function App() {
     }
   }, [gameState.phase]);
 
-  // Game tick
+  // Game tick (Joiner is dormant -- receives state from Host via __STATE_SYNC__)
   useEffect(() => {
     if (gameState.phase === 'title') return;
+    if (netState.isMultiplayer && !netState.isHost) return;
     const id = setInterval(() => {
-      setGameState(prev => updateGame(prev, { type: 'TICK' }));
+      setGameState(prev => {
+        var next = updateGame(prev, { type: 'TICK' });
+        if (netState.isMultiplayer && netState.isHost && netState.connected) {
+          netState.conn.send(JSON.stringify({ type: '__STATE_SYNC__', state: next }));
+        }
+        return next;
+      });
     }, TICK_MS);
     return () => clearInterval(id);
   }, [gameState.phase]);
@@ -1477,9 +1484,14 @@ function App() {
   }, []);
 
   var dispatchAndSend = useCallback(function(action) {
-    dispatch(action);
-    if (netState.isMultiplayer && netState.connected) {
-      netState.conn.send(JSON.stringify(action));
+    if (netState.isMultiplayer && !netState.isHost) {
+      // Joiner: send to Host only, do NOT dispatch locally
+      if (netState.connected) {
+        netState.conn.send(JSON.stringify(action));
+      }
+    } else {
+      // Host or Solo: dispatch locally
+      dispatch(action);
     }
   }, [dispatch]);
 
@@ -1500,7 +1512,7 @@ function App() {
         AudioSys.whistle();
         dispatch({ type: 'START_GAME' });
       },
-      function onData(msg) { dispatch(msg); },
+      function onData(msg) { if (msg.type !== '__STATE_SYNC__') dispatch(msg); },
       function onDisconnect() { setTitleMode('disconnected'); }
     );
   }, [dispatch]);
@@ -1514,7 +1526,11 @@ function App() {
         AudioSys.whistle();
         dispatch({ type: 'START_GAME' });
       },
-      function onData(msg) { dispatch(msg); },
+      function onData(msg) {
+        if (msg.type === '__STATE_SYNC__') {
+          setGameState(msg.state);
+        }
+      },
       function onDisconnect() { setTitleMode('disconnected'); }
     );
   }, [dispatch, joinCode]);
@@ -1724,7 +1740,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.3.0 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.3.1 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -1849,7 +1865,7 @@ function App() {
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.3.0 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.3.1 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
