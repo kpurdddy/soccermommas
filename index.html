@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Soccer Mamas</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
@@ -33,7 +33,7 @@ html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe
 .hud-overlay {
   position: absolute; top: 0; left: 0; width: 100%; z-index: 10;
   display: flex; justify-content: center; align-items: center;
-  padding: 4px 12px; pointer-events: none;
+  padding: calc(4px + env(safe-area-inset-top, 0px)) 12px 4px 12px; pointer-events: none;
 }
 .hud-pill {
   display: flex; align-items: center; gap: 16px;
@@ -44,7 +44,7 @@ html, body { width: 100%; height: 100%; background: #1a1a2e; font-family: 'Segoe
 .hud-pill .clock { color: #ccc; font-variant-numeric: tabular-nums; }
 .hud-pill .half { color: #ccc; font-size: 0.9em; }
 .hud-version {
-  position: absolute; top: 4px; left: 8px; z-index: 10;
+  position: absolute; top: calc(4px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); z-index: 10;
   background: rgba(0,0,0,0.35); border-radius: 6px; padding: 2px 8px;
   color: #FFD700; font-size: 1.2em; font-weight: bold; pointer-events: none;
 }
@@ -505,6 +505,70 @@ function updatePassBall(s) {
   pb.x += vx;
   pb.y += vy;
 
+  // OOB check for pass in flight
+  if (pb.y < 0 || pb.y > 100) {
+    // Sideline OOB — throw-in to opposite team
+    var oobTeam = pb.fromTeam === 'home' ? 'away' : 'home';
+    var oobBx = Math.max(1, Math.min(99, pb.x));
+    var oobBy = pb.y < 0 ? 1 : 99;
+    var oobNearest = null, oobNd = Infinity;
+    for (var oi = 0; oi < s.players.length; oi++) {
+      var op = s.players[oi];
+      if (op.team !== oobTeam) continue;
+      var od = getDist(op.x, op.y, oobBx, oobBy);
+      if (od < oobNd) { oobNd = od; oobNearest = op; }
+    }
+    s.passBall = null;
+    s.ball.carrier = null;
+    if (oobNearest) {
+      oobNearest.hasBall = true; oobNearest.settlingUntil = s.tick + SETTLING_TICKS;
+      s.ball.carrier = oobNearest.id;
+    }
+    s.ball.x = oobBx; s.ball.y = oobBy; s.ball.loose = false;
+    s.possession = oobTeam;
+    s.selectedDefender = null;
+    s.phase = 'oob_pause'; s.oobTimer = s.tick + OOB_PAUSE_TICKS;
+    s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
+    return s;
+  }
+  if (pb.x < 0 || pb.x > 100) {
+    // Endline OOB
+    var endX = pb.x < 0 ? 0 : 100;
+    var half = s.clock.half;
+    var passGoalX = getAttackGoalX(pb.fromTeam, half);
+    var isAttacking = Math.abs(passGoalX - endX) < 1;
+    s.passBall = null;
+    s.ball.carrier = null;
+    if (isAttacking) {
+      // Goal kick for defending team
+      var defTeam = pb.fromTeam === 'home' ? 'away' : 'home';
+      var gkX = endX < 50 ? 8 : 92;
+      var gk = s.players.find(function(p) { return p.team === defTeam && p.role === 'GK'; });
+      s.ball.x = gkX; s.ball.y = 50; s.ball.loose = false;
+      s.possession = defTeam;
+      if (gk) { gk.hasBall = true; gk.settlingUntil = s.tick + SETTLING_TICKS; s.ball.carrier = gk.id; }
+    } else {
+      // Corner — attacking team (opposite of passer) gets the ball
+      var atkTeam = pb.fromTeam === 'home' ? 'away' : 'home';
+      var cx = endX < 50 ? 1 : 99;
+      var cy = pb.y > 50 ? 99 : 1;
+      var cNearest = null, cNd = Infinity;
+      for (var ci = 0; ci < s.players.length; ci++) {
+        var cp = s.players[ci];
+        if (cp.team !== atkTeam) continue;
+        var cd = getDist(cp.x, cp.y, cx, cy);
+        if (cd < cNd) { cNd = cd; cNearest = cp; }
+      }
+      s.ball.x = cx; s.ball.y = cy; s.ball.loose = false;
+      s.possession = atkTeam;
+      if (cNearest) { cNearest.hasBall = true; cNearest.settlingUntil = s.tick + SETTLING_TICKS; s.ball.carrier = cNearest.id; }
+    }
+    s.selectedDefender = null;
+    s.phase = 'oob_pause'; s.oobTimer = s.tick + OOB_PAUSE_TICKS;
+    s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
+    return s;
+  }
+
   // Check interceptions
   const opposingTeam = pb.fromTeam === 'home' ? 'away' : 'home';
   if (!pb.checkedBy) pb.checkedBy = new Set();
@@ -750,6 +814,62 @@ function checkTackles(s) {
 
 function updateLooseBall(s) {
   if (!s.ball.loose) return s;
+
+  // OOB check for loose ball (safety net)
+  if (s.ball.y < 0 || s.ball.y > 100) {
+    var lOobTeam = s.possession === 'home' ? 'away' : 'home';
+    var lBx = Math.max(1, Math.min(99, s.ball.x));
+    var lBy = s.ball.y < 0 ? 1 : 99;
+    var lNearest = null, lNd = Infinity;
+    for (var li = 0; li < s.players.length; li++) {
+      var lp = s.players[li];
+      if (lp.team !== lOobTeam) continue;
+      var ld = getDist(lp.x, lp.y, lBx, lBy);
+      if (ld < lNd) { lNd = ld; lNearest = lp; }
+    }
+    s.ball.carrier = null;
+    if (lNearest) { lNearest.hasBall = true; lNearest.settlingUntil = s.tick + SETTLING_TICKS; s.ball.carrier = lNearest.id; }
+    s.ball.x = lBx; s.ball.y = lBy; s.ball.loose = false;
+    s.possession = lOobTeam; s.selectedDefender = null;
+    s.phase = 'oob_pause'; s.oobTimer = s.tick + OOB_PAUSE_TICKS;
+    s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
+    return s;
+  }
+  if (s.ball.x < 0 || s.ball.x > 100) {
+    var leX = s.ball.x < 0 ? 0 : 100;
+    var lHalf = s.clock.half;
+    var lCauserTeam = s.possession;
+    var lGoalX = getAttackGoalX(lCauserTeam, lHalf);
+    var lIsAttacking = Math.abs(lGoalX - leX) < 1;
+    s.ball.carrier = null;
+    if (lIsAttacking) {
+      var lDefTeam = lCauserTeam === 'home' ? 'away' : 'home';
+      var lgkX = leX < 50 ? 8 : 92;
+      var lgk = s.players.find(function(p) { return p.team === lDefTeam && p.role === 'GK'; });
+      s.ball.x = lgkX; s.ball.y = 50; s.ball.loose = false;
+      s.possession = lDefTeam;
+      if (lgk) { lgk.hasBall = true; lgk.settlingUntil = s.tick + SETTLING_TICKS; s.ball.carrier = lgk.id; }
+    } else {
+      var lAtkTeam = lCauserTeam === 'home' ? 'away' : 'home';
+      var lcx = leX < 50 ? 1 : 99;
+      var lcy = s.ball.y > 50 ? 99 : 1;
+      var lcNearest = null, lcNd = Infinity;
+      for (var lci = 0; lci < s.players.length; lci++) {
+        var lcp = s.players[lci];
+        if (lcp.team !== lAtkTeam) continue;
+        var lcd = getDist(lcp.x, lcp.y, lcx, lcy);
+        if (lcd < lcNd) { lcNd = lcd; lcNearest = lcp; }
+      }
+      s.ball.x = lcx; s.ball.y = lcy; s.ball.loose = false;
+      s.possession = lAtkTeam;
+      if (lcNearest) { lcNearest.hasBall = true; lcNearest.settlingUntil = s.tick + SETTLING_TICKS; s.ball.carrier = lcNearest.id; }
+    }
+    s.selectedDefender = null;
+    s.phase = 'oob_pause'; s.oobTimer = s.tick + OOB_PAUSE_TICKS;
+    s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
+    return s;
+  }
+
   if (s.tick < s.ball.looseTimer) return s;
 
   let nearestPlayer = null;
@@ -1167,7 +1287,7 @@ function checkOutOfBounds(s) {
   if (!carrier) return s;
 
   // Sidelines (y)
-  if (carrier.y < 0 || carrier.y > 100) {
+  if (carrier.y < 2.5 || carrier.y > 97.5) {
     const otherTeam = carrier.team === 'home' ? 'away' : 'home';
     const bx = Math.max(1, Math.min(99, carrier.x));
     const by = carrier.y < 0 ? 1 : 99;
@@ -1192,7 +1312,7 @@ function checkOutOfBounds(s) {
   }
 
   // Endlines (x)
-  if (carrier.x < 0 || carrier.x > 100) {
+  if (carrier.x < 2.5 || carrier.x > 97.5) {
     const half = s.clock.half;
     const endX = carrier.x < 0 ? 0 : 100;
     const carrierGoalX = getAttackGoalX(carrier.team, half);
@@ -1740,7 +1860,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.3.1 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.3.2 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -1755,7 +1875,10 @@ function App() {
         titleMode === 'hosting' ? React.createElement('div', { style: { textAlign: 'center' } },
           React.createElement('div', { style: { fontSize: '1.1em', color: '#ccc', marginBottom: '16px' } }, 'Waiting for Player 2...'),
           React.createElement('div', { style: { fontSize: '3em', fontWeight: 'bold', color: '#ffd700', letterSpacing: '8px', fontFamily: 'monospace' } }, roomCode),
-          React.createElement('div', { style: { fontSize: '0.9em', color: '#888', marginTop: '12px' } }, 'Share this code with your opponent')
+          React.createElement('div', { style: { fontSize: '0.9em', color: '#888', marginTop: '12px' } }, 'Share this code with your opponent'),
+          React.createElement('div', {
+            style: { fontSize: '0.85em', color: '#888', marginTop: '16px', lineHeight: '1.4' }
+          }, 'Best on the same WiFi. Works over the internet but may be laggy. Turn off VPNs.')
         ) : null,
         titleMode === 'join_input' ? React.createElement('div', { style: { textAlign: 'center' } },
           React.createElement('div', { style: { fontSize: '1.1em', color: '#ccc', marginBottom: '12px' } }, 'Enter room code:'),
@@ -1773,7 +1896,10 @@ function App() {
               disabled: joinCode.length !== 4,
               style: { background: joinCode.length === 4 ? '#7c3aed' : '#555', cursor: joinCode.length === 4 ? 'pointer' : 'default' }
             }, 'CONNECT')
-          )
+          ),
+          React.createElement('div', {
+            style: { fontSize: '0.85em', color: '#888', marginTop: '16px', lineHeight: '1.4' }
+          }, 'Best on the same WiFi. Works over the internet but may be laggy. Turn off VPNs.')
         ) : null,
         titleMode === 'joining' ? React.createElement('div', { style: { textAlign: 'center', color: '#ccc' } },
           'Connecting to room ' + joinCode + '...'
@@ -1865,7 +1991,7 @@ function App() {
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
       // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.3.1 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.3.2 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
