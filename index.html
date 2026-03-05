@@ -373,6 +373,7 @@ function updateGame(state, action) {
     case 'DRAG_PLAYER': return dragPlayer(state, action.playerId, action.x, action.y);
     case 'THROUGH_BALL': return throughBall(state, action.x, action.y);
     case 'SET_ROUTE': return setRoute(state, action.playerId, action.route);
+    case 'TELEPORT_ENTITY': return teleportEntity(state, action);
     case 'START_SECOND_HALF': return startSecondHalf(state);
     case 'PLAY_AGAIN': return createInitialState();
     default: return state;
@@ -912,6 +913,7 @@ function cpuPossession(s) {
 
   const carrier = s.players.find(p => p.id === s.ball.carrier);
   if (!carrier || carrier.settlingUntil > s.tick) return s;
+  if (carrier.route && carrier.route.length > 0) return s;
 
   // Check for immediate threat (home defender within 5 units)
   const hasThreat = s.players.some(p =>
@@ -1071,36 +1073,12 @@ function executeShot(state, carrierId, aimX, aimY) {
   var scatterRange = Math.max(0, (distToGoal - 5) * 0.15);
   var targetY = clampedAimY + (gameRNG() - 0.5) * scatterRange;
 
-  // Distance factor: 50% at 5 units, 5% at 25 units
+  // 1. Base probabilities
   var distFactor;
   if (distToGoal <= 5) distFactor = 0.50;
   else if (distToGoal >= 25) distFactor = 0.05;
   else distFactor = 0.50 - 0.45 * (distToGoal - 5) / 20;
 
-  // Aim factor: shots aimed at corners are harder to save but more likely to go wide
-  // Shots aimed at center are easier for keeper but less likely to miss
-  var aimOffCenter = Math.abs(clampedAimY - 50) / 12; // 0 at center, ~1 at posts
-  var cornerSaveBonus = aimOffCenter * 0.25; // corners reduce save chance
-  var cornerWideBonus = aimOffCenter * 0.15; // corners increase wide chance
-
-  // Keeper position factor: if aiming away from keeper, save chance drops
-  var keeperId = shootingTeam === 'home' ? 'away_0' : 'home_0';
-  var keeper = s.players.find(function(p) { return p.id === keeperId; });
-  var keeperFactor = 1.0;
-  if (keeper) {
-    // If keeper is behind the shooter (further from goal than carrier), she can't save it
-    var keeperBehindShooter = shootingTeam === 'home'
-      ? keeper.x < carrier.x
-      : keeper.x > carrier.x;
-    if (keeperBehindShooter) {
-      keeperFactor = 0.05;
-    } else {
-      var keeperDist = Math.abs(keeper.y - clampedAimY);
-      keeperFactor = Math.max(0.4, 1.0 - keeperDist * 0.02);
-    }
-  }
-
-  // Defender factor
   var defFactor = 1.0;
   for (var i = 0; i < s.players.length; i++) {
     var p = s.players[i];
@@ -1108,29 +1086,58 @@ function executeShot(state, carrierId, aimX, aimY) {
     if (getDist(p.x, p.y, carrier.x, carrier.y) < 3) { defFactor = 0.7; break; }
   }
 
-  // Angle factor: 1.0 at center (y=50), 0.5 at edges
   var angleFactor = 1.0 - 0.5 * (Math.abs(carrier.y - 50) / 50);
-
   var baseChance = distFactor * angleFactor * defFactor;
-  var saveChance = (1 - baseChance) * (1 - cornerSaveBonus) * keeperFactor;
+
+  var aimOffCenter = Math.abs(clampedAimY - 50) / 12;
+  var cornerWideBonus = aimOffCenter * 0.15;
   var wideChance = (1 - baseChance) * cornerWideBonus + (1 - baseChance) / 14;
 
-  // Normalize: goal chance, then save, then wide
-  var goalChance = baseChance;
-  var roll = gameRNG();
+  // 2. Maximum save probability (on-target shots that are not base goals)
+  var maxSaveChance = 1.0 - baseChance - wideChance;
 
+  // 3. Keeper effectiveness -- tiered by distance from aim point
+  var keeperId = shootingTeam === 'home' ? 'away_0' : 'home_0';
+  var keeper = s.players.find(function(p) { return p.id === keeperId; });
+  var keeperFactor = 1.0;
+
+  if (keeper) {
+    var keeperDist = Math.abs(keeper.y - clampedAimY);
+    if (keeperDist > 15) {
+      keeperFactor = 0.0;
+    } else if (keeperDist > 8) {
+      keeperFactor = 0.15;
+    } else {
+      keeperFactor = Math.max(0.4, 1.0 - keeperDist * 0.08);
+    }
+  }
+
+  // 4. Actual save chance after keeper positioning
+  var actualSaveChance = maxSaveChance * keeperFactor;
+
+  // 5. Un-saved on-target shots become goals
+  var goalChance = baseChance + (maxSaveChance - actualSaveChance);
+
+  // 6. Roll with explicit boundaries
+  var roll = gameRNG();
   var result;
-  if (roll < goalChance) result = 'goal';
-  else if (roll < 1 - wideChance) result = 'save';
-  else result = 'wide';
+  if (roll < goalChance) {
+    result = 'goal';
+  } else if (roll < goalChance + actualSaveChance) {
+    result = 'save';
+  } else {
+    result = 'wide';
+  }
 
   // Adjust targetY based on result
   if (result === 'wide') {
     targetY = clampedAimY > 50 ? 65 + gameRNG() * 10 : 35 - gameRNG() * 10;
   }
 
-  // On save: ball continues toward the goal line, keeper slides to intercept (in updateShotAnimation)
-  // targetX stays as goalX -- do NOT override with keeper position
+  // On save: ball stops at keeper's x-plane
+  if (result === 'save' && keeper) {
+    targetX = keeper.x;
+  }
 
   carrier.hasBall = false;
   carrier.route = [];
@@ -1424,6 +1431,26 @@ function setRoute(state, playerId, route) {
   return s;
 }
 
+function teleportEntity(state, action) {
+  var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
+  s.ball = { ...s.ball };
+  if (action.entityType === 'ball') {
+    s.ball.x = Math.max(1, Math.min(99, action.x));
+    s.ball.y = Math.max(1, Math.min(99, action.y));
+  } else if (action.entityType === 'player') {
+    for (var ti = 0; ti < s.players.length; ti++) {
+      if (s.players[ti].id === action.id) {
+        s.players[ti].x = Math.max(1, Math.min(99, action.x));
+        s.players[ti].y = Math.max(1, Math.min(99, action.y));
+        s.players[ti].homeX = s.players[ti].x;
+        s.players[ti].homeY = s.players[ti].y;
+        break;
+      }
+    }
+  }
+  return s;
+}
+
 function dragPlayer(state, playerId, x, y) {
   if (state.phase !== 'play') return state;
   var player = state.players.find(function(p) { return p.id === playerId; });
@@ -1544,6 +1571,9 @@ function App() {
   const lastSyncRef = useRef(0);
   const [fieldDims, setFieldDims] = useState({ width: 600, height: 400 });
   var dragRef = useRef({ active: false, isDown: false, playerId: null, startX: 0, startY: 0, startGx: 0, startGy: 0, startTime: 0, lastGx: 0, lastGy: 0, waypoints: [] });
+  var coachToolState = React.useState('route');
+  var coachTool = coachToolState[0];
+  var setCoachTool = coachToolState[1];
   const [titleMode, setTitleMode] = useState('menu'); // 'menu', 'hosting', 'joining', 'disconnected'
   const [roomCode, setRoomCode] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -1679,22 +1709,45 @@ function App() {
     );
   }, [dispatch, joinCode]);
 
-  var handleFieldPointerDown = useCallback(function(e) {
-    AudioSys.init();
-    var state = stateRef.current;
-    if (state.phase !== 'play') return;
-    if (state.ball.loose || state.passBall) return;
+  var handleFieldPointerDown = React.useCallback(function(e) {
+    if (e.target.closest && e.target.closest('button')) return;
+    e.preventDefault();
 
     var rect = fieldRef.current.getBoundingClientRect();
     var px = e.clientX - rect.left;
     var py = e.clientY - rect.top;
     var ppu = pixelsPerUnitRef.current;
     var ypu = fieldDims.height / 100;
-    var gx = px / ppu;
-    var gy = py / ypu;
+    var gx = Math.max(1, Math.min(99, px / ppu));
+    var gy = Math.max(1, Math.min(99, py / ypu));
 
-    // Find if a local team player is under the finger
+    var state = stateRef.current;
+    if (state.phase !== 'play') return;
+
+    var fullReset = {
+      active: false, isDown: false, mode: 'player', playerId: null,
+      startX: 0, startY: 0, startGx: 0, startGy: 0, startTime: 0,
+      lastGx: 0, lastGy: 0, lastDispatchTime: 0, waypoints: []
+    };
+
     var tapRadius = 48;
+
+    // Sandbox MOVE tool: check ball proximity first
+    if (sandboxMode && coachTool === 'move') {
+      var ballPx = state.ball.x * ppu;
+      var ballPy = state.ball.y * ypu;
+      var ballDist = Math.sqrt((px - ballPx) * (px - ballPx) + (py - ballPy) * (py - ballPy));
+      if (ballDist < tapRadius) {
+        dragRef.current = {
+          active: false, isDown: true, mode: 'ball', playerId: null,
+          startX: px, startY: py, startGx: gx, startGy: gy, startTime: Date.now(),
+          lastGx: gx, lastGy: gy, lastDispatchTime: Date.now(), waypoints: []
+        };
+        return;
+      }
+    }
+
+    // Find player under finger
     var tappedPlayer = null;
     var minDist = Infinity;
     for (var i = 0; i < state.players.length; i++) {
@@ -1709,27 +1762,16 @@ function App() {
       }
     }
 
-    // Store pointer start state for tap/drag detection
     dragRef.current = {
-      active: false,
-      isDown: true,
-      playerId: tappedPlayer ? tappedPlayer.id : null,
-      startX: px,
-      startY: py,
-      startGx: gx,
-      startGy: gy,
-      startTime: Date.now(),
-      lastGx: gx,
-      lastGy: gy,
-      waypoints: [],
+      active: false, isDown: true, mode: 'player', playerId: tappedPlayer ? tappedPlayer.id : null,
+      startX: px, startY: py, startGx: gx, startGy: gy, startTime: Date.now(),
+      lastGx: gx, lastGy: gy, lastDispatchTime: Date.now(), waypoints: []
     };
-  }, [fieldDims]);
+  }, [dispatchAndSend, fieldDims, sandboxMode, coachTool, localTeam]);
 
-  var handleFieldPointerMove = useCallback(function(e) {
+  var handleFieldPointerMove = React.useCallback(function(e) {
     var dr = dragRef.current;
     if (!dr.isDown) return;
-    if (!dr.playerId) return;
-    if (stateRef.current.phase !== 'play') return;
 
     var rect = fieldRef.current.getBoundingClientRect();
     var px = e.clientX - rect.left;
@@ -1739,58 +1781,95 @@ function App() {
     var gx = Math.max(1, Math.min(99, px / ppu));
     var gy = Math.max(1, Math.min(99, py / ypu));
 
-    var movedPx = Math.sqrt(
-      (px - dr.startX) * (px - dr.startX) + (py - dr.startY) * (py - dr.startY)
-    );
-
-    // If finger moved more than 10px, it's a drag
-    if (movedPx > 10) {
+    // Activate drag once finger has moved 10px
+    if (!dr.active) {
+      var moveDist = Math.sqrt((px - dr.startX) * (px - dr.startX) + (py - dr.startY) * (py - dr.startY));
+      if (moveDist < 10) return;
       dr.active = true;
     }
 
     if (dr.active) {
-      // Sample waypoints: only add if >3 game units from last waypoint
+      // MOVE tool: teleport ball or player (throttled to 50ms)
+      if (dr.mode === 'ball' || (dr.mode === 'player' && sandboxMode && coachTool === 'move')) {
+        var now = Date.now();
+        if (now - (dr.lastDispatchTime || 0) > 50) {
+          dispatchAndSend({
+            type: 'TELEPORT_ENTITY',
+            entityType: dr.mode,
+            id: dr.playerId,
+            x: gx,
+            y: gy
+          });
+          dr.lastDispatchTime = now;
+        }
+        return;
+      }
+
+      // ROUTE tool (or normal live play): sample waypoints
+      if (dr.playerId === null) return;
       var lastWp = dr.waypoints.length > 0 ? dr.waypoints[dr.waypoints.length - 1] : { x: dr.startGx, y: dr.startGy };
       var wpDist = Math.sqrt((gx - lastWp.x) * (gx - lastWp.x) + (gy - lastWp.y) * (gy - lastWp.y));
       if (wpDist >= 3) {
         dr.waypoints.push({ x: gx, y: gy });
-        // Dispatch route so player starts following and lines render
         dispatchAndSend({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
       }
     }
-  }, [dispatchAndSend, fieldDims]);
+  }, [dispatchAndSend, fieldDims, sandboxMode, coachTool]);
 
-  var handleFieldPointerUp = useCallback(function(e) {
+  var handleFieldPointerUp = React.useCallback(function(e) {
     var dr = dragRef.current;
-    if (!dr.isDown) return; // Absorb duplicate pointerLeave events
+    if (!dr.isDown) return;
+
+    var fullReset = {
+      active: false, isDown: false, mode: 'player', playerId: null,
+      startX: 0, startY: 0, startGx: 0, startGy: 0, startTime: 0,
+      lastGx: 0, lastGy: 0, lastDispatchTime: 0, waypoints: []
+    };
 
     var state = stateRef.current;
     if (state.phase !== 'play') {
-      dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
+      dragRef.current = fullReset;
       return;
     }
 
-    // If it was a drag, finalize the route
     if (dr.active) {
-      // Final waypoint at release position (only if >3 units from last waypoint)
-      var rect2 = fieldRef.current.getBoundingClientRect();
-      var fpx = e.clientX - rect2.left;
-      var fpy = e.clientY - rect2.top;
-      var fppu = pixelsPerUnitRef.current;
-      var fypu = fieldDims.height / 100;
-      var fgx = Math.max(1, Math.min(99, fpx / fppu));
-      var fgy = Math.max(1, Math.min(99, fpy / fypu));
-      var lastWp2 = dr.waypoints.length > 0 ? dr.waypoints[dr.waypoints.length - 1] : { x: dr.startGx, y: dr.startGy };
-      var finalDist = Math.sqrt((fgx - lastWp2.x) * (fgx - lastWp2.x) + (fgy - lastWp2.y) * (fgy - lastWp2.y));
-      if (finalDist >= 3) {
-        dr.waypoints.push({ x: fgx, y: fgy });
+      // Finalize MOVE tool -- exact drop position
+      if (dr.mode === 'ball' || (dr.mode === 'player' && sandboxMode && coachTool === 'move')) {
+        var rectTele = fieldRef.current.getBoundingClientRect();
+        var fgxTele = Math.max(1, Math.min(99, (e.clientX - rectTele.left) / pixelsPerUnitRef.current));
+        var fgyTele = Math.max(1, Math.min(99, (e.clientY - rectTele.top) / (fieldDims.height / 100)));
+        dispatchAndSend({
+          type: 'TELEPORT_ENTITY',
+          entityType: dr.mode,
+          id: dr.playerId,
+          x: fgxTele,
+          y: fgyTele
+        });
+        dragRef.current = fullReset;
+        return;
       }
-      dispatchAndSend({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
-      dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
+
+      // Finalize ROUTE tool -- add final waypoint if needed
+      if (dr.playerId !== null) {
+        var rect2 = fieldRef.current.getBoundingClientRect();
+        var fpx = e.clientX - rect2.left;
+        var fpy = e.clientY - rect2.top;
+        var fppu = pixelsPerUnitRef.current;
+        var fypu = fieldDims.height / 100;
+        var fgx = Math.max(1, Math.min(99, fpx / fppu));
+        var fgy = Math.max(1, Math.min(99, fpy / fypu));
+        var lastWp2 = dr.waypoints.length > 0 ? dr.waypoints[dr.waypoints.length - 1] : { x: dr.startGx, y: dr.startGy };
+        var finalDist = Math.sqrt((fgx - lastWp2.x) * (fgx - lastWp2.x) + (fgy - lastWp2.y) * (fgy - lastWp2.y));
+        if (finalDist >= 3) {
+          dr.waypoints.push({ x: fgx, y: fgy });
+        }
+        dispatchAndSend({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
+      }
+      dragRef.current = fullReset;
       return;
     }
 
-    // It was a tap (finger didn't move enough to qualify as drag)
+    // --- TAP LOGIC (verbatim from original) ---
     var rect = fieldRef.current.getBoundingClientRect();
     var px = e.clientX - rect.left;
     var py = e.clientY - rect.top;
@@ -1805,7 +1884,7 @@ function App() {
       // OFFENSE TAP LOGIC
       var carrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
       if (!carrier || carrier.team !== localTeam) {
-        dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
+        dragRef.current = fullReset;
         return;
       }
 
@@ -1816,7 +1895,7 @@ function App() {
       if (inRange && isGoalTap) {
         AudioSys.kick();
         dispatchAndSend({ type: 'SHOOT', aimX: gx, aimY: gy });
-        dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
+        dragRef.current = fullReset;
         return;
       }
 
@@ -1840,7 +1919,7 @@ function App() {
       if (tappedTeammate) {
         AudioSys.tic();
         dispatchAndSend({ type: 'TAP_PLAYER', playerId: tappedTeammate.id });
-        dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
+        dragRef.current = fullReset;
         return;
       }
 
@@ -1876,8 +1955,8 @@ function App() {
     }
     } // end sandbox pause guard
 
-    dragRef.current = { active: false, isDown: false, playerId: null, waypoints: [] };
-  }, [dispatchAndSend, fieldDims]);
+    dragRef.current = fullReset;
+  }, [dispatchAndSend, fieldDims, sandboxMode, coachTool, localTeam]);
 
   // TITLE SCREEN + LANDING PAGE
   if (gameState.phase === 'title') {
@@ -1887,7 +1966,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.4.1 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.4.2 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2031,7 +2110,7 @@ function App() {
       React.createElement('svg', {
         ref: fieldRef,
         width: fw, height: fh,
-        style: { display: 'block', touchAction: 'none', cursor: 'pointer' },
+        style: { display: 'block', touchAction: 'none', cursor: (sandboxMode && coachTool === 'move') ? 'grab' : 'default' },
         onPointerDown: handleFieldPointerDown,
         onPointerMove: handleFieldPointerMove,
         onPointerUp: handleFieldPointerUp,
@@ -2062,7 +2141,7 @@ function App() {
         ) : []),
 
         // Route lines for players with active routes
-        ...gameState.players.filter(function(p) { return p.team === localTeam && p.route && p.route.length > 0; }).map(function(p) {
+        ...gameState.players.filter(function(p) { return (sandboxMode || p.team === localTeam) && p.route && p.route.length > 0; }).map(function(p) {
           var points = (p.x * ppu) + ',' + (p.y * ypu);
           for (var i = 0; i < p.route.length; i++) {
             points += ' ' + (p.route[i].x * ppu) + ',' + (p.route[i].y * ypu);
@@ -2079,7 +2158,7 @@ function App() {
         }),
 
         // Route waypoint dots
-        ...gameState.players.filter(function(p) { return p.team === localTeam && p.route && p.route.length > 0; }).reduce(function(acc, p) {
+        ...gameState.players.filter(function(p) { return (sandboxMode || p.team === localTeam) && p.route && p.route.length > 0; }).reduce(function(acc, p) {
           p.route.forEach(function(wp, i) {
             acc.push(React.createElement('circle', {
               key: 'wp-' + p.id + '-' + i,
@@ -2145,7 +2224,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.1 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.2 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
@@ -2257,9 +2336,9 @@ function App() {
         }, 'PLAY AGAIN'),
       ) : null,
 
-      // Sandbox pause/resume button + label
+      // Sandbox toolbar
       sandboxMode && gameState.phase === 'play' ? React.createElement('div', {
-        key: 'sandbox-btn',
+        key: 'sandbox-toolbar',
         style: {
           position: 'absolute',
           top: 'calc(8px + env(safe-area-inset-top, 0px))',
@@ -2267,8 +2346,7 @@ function App() {
           zIndex: 20,
           pointerEvents: 'auto',
           display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
+          gap: '8px',
         }
       },
         React.createElement('button', {
@@ -2281,22 +2359,41 @@ function App() {
             color: 'white',
             border: '1px solid rgba(255,255,255,0.3)',
             borderRadius: '6px',
-            padding: '4px 10px',
-            fontSize: '0.95em',
+            padding: '6px 12px',
             fontWeight: 'bold',
             cursor: 'pointer',
           }
         }, gameState.sandboxPaused ? '\u25B6 RESUME' : '\u23F8 PAUSE'),
-        gameState.sandboxPaused ? React.createElement('div', {
+        React.createElement('button', {
+          onPointerDown: function(e) {
+            e.stopPropagation();
+            setCoachTool('move');
+          },
           style: {
-            marginTop: '4px',
-            textAlign: 'center',
-            fontSize: '0.7em',
-            color: '#6ee7b7',
+            background: coachTool === 'move' ? '#2563eb' : 'rgba(0,0,0,0.55)',
+            color: 'white',
+            border: '1px solid rgba(255,255,255,0.3)',
+            borderRadius: '6px',
+            padding: '6px 12px',
             fontWeight: 'bold',
-            letterSpacing: '1px',
+            cursor: 'pointer',
           }
-        }, 'SANDBOX') : null
+        }, 'MOVE'),
+        React.createElement('button', {
+          onPointerDown: function(e) {
+            e.stopPropagation();
+            setCoachTool('route');
+          },
+          style: {
+            background: coachTool === 'route' ? '#2563eb' : 'rgba(0,0,0,0.55)',
+            color: 'white',
+            border: '1px solid rgba(255,255,255,0.3)',
+            borderRadius: '6px',
+            padding: '6px 12px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+          }
+        }, 'ROUTE')
       ) : null,
     ),
 

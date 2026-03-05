@@ -1,5 +1,62 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.4.2 (2026-03-05)
+- Shot probability fix: saveChance was calculated but never used in the roll logic -- replaced entire probability block so keeperFactor now correctly modulates save rates; keeper distance uses tiered thresholds (>15=0, >8=0.15, else 0.4-1.0); un-saved on-target shots become goals
+- Shot save animation: ball now stops at keeper's x-position instead of goal line on saves
+- Route visibility in sandbox: opponent route lines and waypoint dots now visible in sandbox mode (still hidden in normal play)
+- Sandbox MOVE/ROUTE toolbar: added coachTool state (route/move); toolbar shows PAUSE/RESUME + MOVE + ROUTE buttons; MOVE tool enables drag-to-teleport for any player or the ball; ROUTE tool preserves original drag-to-draw-route behavior; field cursor changes to grab when MOVE is active
+- TELEPORT_ENTITY reducer action: moves player or ball to exact coordinates, updates homeX/homeY so players stay put after teleport
+- Pointer handler rewrite: handleFieldPointerDown/Move/Up fully replaced to support mode-based branching (ball drag, player move, route draw); tap logic preserved verbatim
+- Targeted CPU suppression: CPU carrier with an active route skips cpuPossession logic (no auto-pass/shoot override), but defensive behavior and tackles still fire normally
+- Version updated to Alpha 2.4.2
+- Token count: ~22k; Build time: ~12 min
+
+## Alpha 2.4.1 (2026-03-04)
+- Sandbox opponent drag fix: removed incorrect pause requirement for dragging opponent players -- in sandbox mode, opponent players can now be dragged at any time (paused or live), while non-sandbox modes still block opponent dragging
+- Version updated to Alpha 2.4.1
+
+## Alpha 2.4.0 (2026-03-04)
+- Sandbox mode: new single-player mode selectable from title screen via green SANDBOX button
+- Pause/Resume button appears in top-right corner during sandbox play phase
+- When paused: game clock frozen, tick loop frozen, all player positions frozen
+- While paused: drag ANY player (home or away) to reposition or draw routes for them
+- While paused: tap actions (pass, shoot, through ball, tackle) are disabled -- only drag/route works
+- On resume: players with drawn routes follow them, players without routes drift normally
+- sandboxPaused flag in state controls freeze -- no new game phases added
+- Reducer actions: SANDBOX_PAUSE and SANDBOX_RESUME toggle the flag
+- sandboxMode module var ensures pause button only appears in sandbox sessions (not solo/multiplayer)
+- startSoloGame resets sandboxMode to false so regular solo play is unaffected
+- Version updated to Alpha 2.4.0
+
+## Alpha 2.3.3 (2026-03-04)
+- Shot direction fix: keeperFactor now checks keeper X position relative to shooter -- if keeper is behind the shooter (further from goal), save chance drops to 0.05 instead of using normal Y-distance calculation
+- Shot direction fix: removed save result targetX override that sent the ball toward the keeper's X position -- ball now always flies toward the goal line on saves, keeper slides to intercept via updateShotAnimation
+- Multiplayer crash prevention: added null check on netState.conn, try/catch around conn.send(), and 50ms throttle (lastSyncRef timestamp gate) to prevent WebRTC RTCDataChannel buffer overflow from crashing the game loop
+- Multiplayer crash prevention: added netState dependencies to game tick useEffect for proper cleanup on connection state changes
+- iPad joiner HUD fix: moved HUD divs (version text, score/half/clock) to render AFTER the SVG in DOM order so Safari compositor cannot layer the SVG on top of the HUD on joiner devices
+- Version updated to Alpha 2.3.3
+
+## Alpha 2.3.2 (2026-03-04)
+- OOB fix: lowered carrier out-of-bounds threshold from 0/100 to 2.5/97.5 so sideline/endline triggers actually fire (route clamps and ARRIVAL_DIST prevented players from ever reaching 0/100)
+- OOB fix: added boundary check for passes in flight -- ball crossing sideline/endline during a pass now triggers throw-in/goal kick/corner correctly
+- OOB fix: added boundary check for loose balls as a safety net
+- iPad HUD: added env(safe-area-inset-top) padding to .hud-overlay and .hud-version so score/clock/version are visible below the status bar/notch on iPad Safari
+- Added viewport-fit=cover to meta viewport tag (required for safe-area-inset CSS to work)
+- WiFi/VPN note: added helper text on Host and Join screens: "Best on the same WiFi. Works over the internet but may be laggy. Turn off VPNs."
+- LICENSE file: added copyright notice (all rights reserved, no reuse/modification/distribution)
+- Version updated to Alpha 2.3.2
+
+## Alpha 2.3.1 (2026-03-01)
+- Host authority sync: Host is now single source of truth for game state
+- Joiner's tick loop disabled in multiplayer -- Joiner only renders state received from Host
+- Host broadcasts full gameState to Joiner via __STATE_SYNC__ message every frame (~30fps)
+- Joiner inputs (pass, shoot, route, tackle) sent to Host only, not dispatched locally
+- Host dispatches Joiner actions into its reducer; result comes back in next state broadcast
+- Fixes state divergence issue from 2.3.0 where independent tick loops caused mismatched positions/scores/clock
+- Solo play completely unchanged -- all multiplayer routing dormant when netState.isMultiplayer is false
+- Seeded PRNG kept in place for potential future deterministic sync optimization
+- Version updated to Alpha 2.3.1
+
 ## Alpha 2.3.0 (2026-03-01)
 - Two-player local WiFi via PeerJS WebRTC: Host Game shows 4-digit room code, Join Game connects with code
 - Title screen now offers Play Solo, Host Game, and Join Game (replaces single Kick Off button)
