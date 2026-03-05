@@ -353,7 +353,7 @@ function createInitialState() {
     oobTimer: 0,
     saveDisplayTimer: 0,
     selectedDefender: null,
-    sandboxPaused: false,
+    tacticalPaused: false,
   };
 }
 
@@ -362,8 +362,8 @@ function updateGame(state, action) {
   switch (action.type) {
     case 'START_GAME': return startGame(state);
     case 'TICK': return gameTick(state);
-    case 'SANDBOX_PAUSE': return { ...state, sandboxPaused: true };
-    case 'SANDBOX_RESUME': return { ...state, sandboxPaused: false };
+    case 'TACTICAL_PAUSE': return { ...state, tacticalPaused: true };
+    case 'TACTICAL_RESUME': return { ...state, tacticalPaused: false };
     case 'TAP_PLAYER': return tapPlayer(state, action.playerId);
     case 'TAP_FIELD': return tapField(state, action.x, action.y);
     case 'SHOOT': return executeShot(state, state.ball.carrier, action.aimX, action.aimY);
@@ -386,7 +386,7 @@ function startGame(state) {
 
 function gameTick(state) {
   if (state.phase === 'title' || state.phase === 'halftime' || state.phase === 'fulltime') return state;
-  if (state.sandboxPaused) return state;
+  if (state.tacticalPaused) return state;
 
   if (state.phase === 'kickoff_pause') {
     let s = { ...state, tick: state.tick + 1 };
@@ -1878,8 +1878,8 @@ function App() {
     var gx = px / ppu;
     var gy = py / ypu;
 
-    // Skip ball action taps when sandbox is paused
-    if (!state.sandboxPaused) {
+    // Skip ball action taps when tactically paused
+    if (!state.tacticalPaused) {
     if (state.possession === localTeam) {
       // OFFENSE TAP LOGIC
       var carrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
@@ -1966,7 +1966,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.4.2 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.4.3 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2224,7 +2224,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.2 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.3 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
@@ -2352,10 +2352,10 @@ function App() {
         React.createElement('button', {
           onPointerDown: function(e) {
             e.stopPropagation();
-            dispatch({ type: gameState.sandboxPaused ? 'SANDBOX_RESUME' : 'SANDBOX_PAUSE' });
+            dispatch({ type: gameState.tacticalPaused ? 'TACTICAL_RESUME' : 'TACTICAL_PAUSE' });
           },
           style: {
-            background: gameState.sandboxPaused ? '#059669' : 'rgba(0,0,0,0.55)',
+            background: gameState.tacticalPaused ? '#059669' : 'rgba(0,0,0,0.55)',
             color: 'white',
             border: '1px solid rgba(255,255,255,0.3)',
             borderRadius: '6px',
@@ -2363,7 +2363,7 @@ function App() {
             fontWeight: 'bold',
             cursor: 'pointer',
           }
-        }, gameState.sandboxPaused ? '\u25B6 RESUME' : '\u23F8 PAUSE'),
+        }, gameState.tacticalPaused ? '\u25B6 RESUME' : '\u23F8 PAUSE'),
         React.createElement('button', {
           onPointerDown: function(e) {
             e.stopPropagation();
@@ -2394,6 +2394,61 @@ function App() {
             cursor: 'pointer',
           }
         }, 'ROUTE')
+      ) : null,
+
+      // Tactical pause button (solo and multiplayer -- not sandbox, which has its own toolbar)
+      !sandboxMode && gameState.phase === 'play' ? React.createElement('button', {
+        key: 'tactical-pause-btn',
+        onPointerDown: function(e) {
+          e.stopPropagation();
+          dispatchAndSend({ type: gameState.tacticalPaused ? 'TACTICAL_RESUME' : 'TACTICAL_PAUSE' });
+        },
+        style: {
+          position: 'absolute',
+          bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
+          right: 'calc(12px + env(safe-area-inset-right, 0px))',
+          zIndex: 20,
+          pointerEvents: 'auto',
+          background: gameState.tacticalPaused ? '#059669' : 'rgba(0,0,0,0.55)',
+          color: 'white',
+          border: '1px solid rgba(255,255,255,0.3)',
+          borderRadius: '6px',
+          padding: '8px 14px',
+          fontWeight: 'bold',
+          fontSize: '0.95em',
+          cursor: 'pointer',
+        }
+      }, gameState.tacticalPaused ? '\u25B6 RESUME' : '\u23F8 PAUSE') : null,
+
+      // Tactical pause overlay (not shown in sandbox -- sandbox has its own toolbar)
+      gameState.tacticalPaused && !sandboxMode ? React.createElement('div', {
+        key: 'tactical-pause-overlay',
+        style: {
+          position: 'absolute',
+          top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none',
+          zIndex: 15,
+        }
+      },
+        React.createElement('div', {
+          style: {
+            fontSize: Math.max(28, fw * 0.05) + 'px',
+            fontWeight: 'bold',
+            color: 'white',
+            textShadow: '0 2px 8px rgba(0,0,0,0.8)',
+            letterSpacing: '4px',
+            marginBottom: '8px',
+          }
+        }, 'PAUSED'),
+        React.createElement('div', {
+          style: {
+            fontSize: Math.max(14, fw * 0.025) + 'px',
+            color: '#ccc',
+            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+          }
+        }, 'Draw routes for your players')
       ) : null,
     ),
 

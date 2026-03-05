@@ -1,5 +1,14 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.4.3 (2026-03-05)
+- Tactical pause in all modes: PAUSE/RESUME button now visible during play phase in solo and multiplayer (bottom-right corner), not just sandbox
+- Pause uses dispatchAndSend so it works over multiplayer networking -- joiner can pause, host freezes tick loop, both players draw routes for their own team while paused
+- Renamed sandboxPaused to tacticalPaused and SANDBOX_PAUSE/SANDBOX_RESUME to TACTICAL_PAUSE/TACTICAL_RESUME throughout codebase (8 replacements)
+- "PAUSED -- Draw routes for your players" overlay text appears when paused in solo/multiplayer only (pointerEvents: none so it doesn't block touch)
+- Sandbox mode unchanged -- keeps its full toolbar (PAUSE + MOVE + ROUTE), no PAUSED overlay shown
+- Zero game logic changes, zero networking changes -- all infrastructure already existed from sandbox build
+- Version updated to Alpha 2.4.3
+
 ## Alpha 2.4.2 (2026-03-05)
 - Shot probability fix: saveChance was calculated but never used in the roll logic -- replaced entire probability block so keeperFactor now correctly modulates save rates; keeper distance uses tiered thresholds (>15=0, >8=0.15, else 0.4-1.0); un-saved on-target shots become goals
 - Shot save animation: ball now stops at keeper's x-position instead of goal line on saves
