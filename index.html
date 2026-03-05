@@ -1699,7 +1699,7 @@ function App() {
     var minDist = Infinity;
     for (var i = 0; i < state.players.length; i++) {
       var p = state.players[i];
-      if (p.team !== localTeam && !(sandboxMode && state.sandboxPaused)) continue;
+      if (!sandboxMode && p.team !== localTeam) continue;
       var ppx = p.x * ppu;
       var ppy = p.y * ypu;
       var dist = Math.sqrt((px - ppx) * (px - ppx) + (py - ppy) * (py - ppy));
@@ -1887,7 +1887,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.4.0 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.4.1 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2145,7 +2145,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.0 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.1 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
