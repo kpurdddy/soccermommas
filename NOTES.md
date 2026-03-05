@@ -1,5 +1,13 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.4.4 (2026-03-05)
+- Teleport zoom bug fix: MOVE tool now clears route, burstTarget, cooldownUntil, and settlingUntil when repositioning a player, preventing stale movement commands and frozen timers
+- Ball follows carrier: if the moved player has possession, the ball teleports with them
+- Ball drag strips possession: dragging the ball away from a carrier clears carrier, sets hasBall false, and cancels any active passBall or shot animation
+- Ball drag always resets loose timer: dragging an already-loose ball gives a fresh LOOSE_BALL_TICKS window so nearby players don't instantly grab it
+- Known issue: GK clamping in driftPlayers snaps goalkeepers back to the goal box after teleport -- fix deferred to next build
+- Version updated to Alpha 2.4.4
+
 ## Alpha 2.4.3 (2026-03-05)
 - Tactical pause in all modes: PAUSE/RESUME button now visible during play phase in solo and multiplayer (bottom-right corner), not just sandbox
 - Pause uses dispatchAndSend so it works over multiplayer networking -- joiner can pause, host freezes tick loop, both players draw routes for their own team while paused

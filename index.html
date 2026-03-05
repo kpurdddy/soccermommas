@@ -1437,6 +1437,25 @@ function teleportEntity(state, action) {
   if (action.entityType === 'ball') {
     s.ball.x = Math.max(1, Math.min(99, action.x));
     s.ball.y = Math.max(1, Math.min(99, action.y));
+
+    // Cancel any in-flight pass or shot so they don't override the drag
+    s.passBall = null;
+    s.shot = null;
+
+    // Strip possession if carried
+    if (s.ball.carrier) {
+      for (var bi = 0; bi < s.players.length; bi++) {
+        if (s.players[bi].id === s.ball.carrier) {
+          s.players[bi].hasBall = false;
+          break;
+        }
+      }
+      s.ball.carrier = null;
+    }
+
+    // Always mark loose with fresh timer -- whether ball was carried or already loose
+    s.ball.loose = true;
+    s.ball.looseTimer = s.tick + LOOSE_BALL_TICKS;
   } else if (action.entityType === 'player') {
     for (var ti = 0; ti < s.players.length; ti++) {
       if (s.players[ti].id === action.id) {
@@ -1444,6 +1463,21 @@ function teleportEntity(state, action) {
         s.players[ti].y = Math.max(1, Math.min(99, action.y));
         s.players[ti].homeX = s.players[ti].x;
         s.players[ti].homeY = s.players[ti].y;
+
+        // Clear old movement data so they don't sprint away on resume
+        s.players[ti].route = [];
+        s.players[ti].burstTarget = null;
+
+        // Clear temporal state so they're immediately responsive
+        s.players[ti].cooldownUntil = 0;
+        s.players[ti].settlingUntil = 0;
+
+        // If the moved player has the ball, move the ball with them
+        if (s.ball.carrier === action.id) {
+          s.ball.x = s.players[ti].x;
+          s.ball.y = s.players[ti].y;
+        }
+
         break;
       }
     }
@@ -1966,7 +2000,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.4.3 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.4.4 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2224,7 +2258,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.3 -- test build'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.4 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
