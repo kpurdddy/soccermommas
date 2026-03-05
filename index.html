@@ -1083,9 +1083,16 @@ function executeShot(state, carrierId, aimX, aimY) {
   var keeper = s.players.find(function(p) { return p.id === keeperId; });
   var keeperFactor = 1.0;
   if (keeper) {
-    var keeperDist = Math.abs(keeper.y - clampedAimY);
-    // Closer to keeper = higher save chance, further = lower
-    keeperFactor = Math.max(0.4, 1.0 - keeperDist * 0.02);
+    // If keeper is behind the shooter (further from goal than carrier), she can't save it
+    var keeperBehindShooter = shootingTeam === 'home'
+      ? keeper.x < carrier.x
+      : keeper.x > carrier.x;
+    if (keeperBehindShooter) {
+      keeperFactor = 0.05;
+    } else {
+      var keeperDist = Math.abs(keeper.y - clampedAimY);
+      keeperFactor = Math.max(0.4, 1.0 - keeperDist * 0.02);
+    }
   }
 
   // Defender factor
@@ -1117,16 +1124,8 @@ function executeShot(state, carrierId, aimX, aimY) {
     targetY = clampedAimY > 50 ? 65 + gameRNG() * 10 : 35 - gameRNG() * 10;
   }
 
-  // If save: stop ball at keeper's depth (X) but keep aimed direction (Y)
-  // so keeper has to dive to intercept
-  if (result === 'save') {
-    var saveKeeperId = shootingTeam === 'home' ? 'away_0' : 'home_0';
-    var saveKeeper = s.players.find(function(p) { return p.id === saveKeeperId; });
-    if (saveKeeper) {
-      targetX = saveKeeper.x;
-      // targetY stays as the player's aimed position -- keeper dives to it
-    }
-  }
+  // On save: ball continues toward the goal line, keeper slides to intercept (in updateShotAnimation)
+  // targetX stays as goalX -- do NOT override with keeper position
 
   carrier.hasBall = false;
   carrier.route = [];
@@ -1537,6 +1536,7 @@ function App() {
   const pixelsPerUnitRef = useRef(1);
   const fieldRef = useRef(null);
   const containerRef = useRef(null);
+  const lastSyncRef = useRef(0);
   const [fieldDims, setFieldDims] = useState({ width: 600, height: 400 });
   var dragRef = useRef({ active: false, isDown: false, playerId: null, startX: 0, startY: 0, startGx: 0, startGy: 0, startTime: 0, lastGx: 0, lastGy: 0, waypoints: [] });
   const [titleMode, setTitleMode] = useState('menu'); // 'menu', 'hosting', 'joining', 'disconnected'
@@ -1587,17 +1587,35 @@ function App() {
   useEffect(() => {
     if (gameState.phase === 'title') return;
     if (netState.isMultiplayer && !netState.isHost) return;
+
     const id = setInterval(() => {
       setGameState(prev => {
         var next = updateGame(prev, { type: 'TICK' });
-        if (netState.isMultiplayer && netState.isHost && netState.connected) {
-          netState.conn.send(JSON.stringify({ type: '__STATE_SYNC__', state: next }));
+
+        if (netState.isMultiplayer && netState.isHost && netState.connected && netState.conn) {
+          const now = Date.now();
+          if (now - lastSyncRef.current >= 50) {
+            try {
+              netState.conn.send(JSON.stringify({ type: '__STATE_SYNC__', state: next }));
+              lastSyncRef.current = now;
+            } catch (error) {
+              console.error('State sync error:', error);
+            }
+          }
         }
+
         return next;
       });
     }, TICK_MS);
+
     return () => clearInterval(id);
-  }, [gameState.phase]);
+  }, [
+    gameState.phase,
+    netState.isMultiplayer,
+    netState.isHost,
+    netState.connected,
+    netState.conn
+  ]);
 
   const dispatch = useCallback((action) => {
     setGameState(prev => updateGame(prev, action));
@@ -1860,7 +1878,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.3.2 -- test build'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.3.3 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -1990,19 +2008,6 @@ function App() {
   return React.createElement('div', { className: 'game-container', ref: containerRef },
     // PITCH (wrapped in div for overlay positioning)
     React.createElement('div', { style: { position: 'relative', width: fw, height: fh } },
-      // HUD overlay - version text
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.3.2 -- test build'),
-      // HUD overlay - score/half/clock
-      React.createElement('div', { className: 'hud-overlay' },
-        React.createElement('div', { className: 'hud-pill' },
-          React.createElement('span', { className: 'half' },
-            (gameState.possession === 'home' ? '\u{1F7E6} ' : '\u{1F7E5} ') + halfStr),
-          React.createElement('span', { className: 'score' },
-            gameState.score.home + ' \u2014 ' + gameState.score.away
-          ),
-          React.createElement('span', { className: 'clock' }, clockStr)
-        )
-      ),
       React.createElement('svg', {
         ref: fieldRef,
         width: fw, height: fh,
@@ -2117,6 +2122,20 @@ function App() {
           opacity: 0.5 + 0.3 * Math.sin(gameState.tick * 0.3),
           strokeDasharray: '4 3',
         }) : null,
+      ),
+
+      // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.3.3 -- test build'),
+      // HUD overlay - score/half/clock
+      React.createElement('div', { className: 'hud-overlay' },
+        React.createElement('div', { className: 'hud-pill' },
+          React.createElement('span', { className: 'half' },
+            (gameState.possession === 'home' ? '\u{1F7E6} ' : '\u{1F7E5} ') + halfStr),
+          React.createElement('span', { className: 'score' },
+            gameState.score.home + ' \u2014 ' + gameState.score.away
+          ),
+          React.createElement('span', { className: 'clock' }, clockStr)
+        )
       ),
 
       // GOAL! overlay
