@@ -512,7 +512,7 @@ function updatePassBall(s) {
   pb.y += vy;
 
   // OOB check for pass in flight
-  if (!pb.toId && (pb.y < 0 || pb.y > 100)) {
+  if (pb.y < 0 || pb.y > 100) {
     // Sideline OOB — throw-in to opposite team
     var oobTeam = pb.fromTeam === 'home' ? 'away' : 'home';
     var oobBx = Math.max(1, Math.min(99, pb.x));
@@ -537,7 +537,7 @@ function updatePassBall(s) {
     s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
     return s;
   }
-  if (!pb.toId && (pb.x < 0 || pb.x > 100)) {
+  if (pb.x < 0 || pb.x > 100) {
     // Endline OOB
     var endX = pb.x < 0 ? 0 : 100;
     var half = s.clock.half;
@@ -1298,10 +1298,10 @@ function checkOutOfBounds(s) {
   if (!carrier) return s;
 
   // Sidelines (y)
-  if (carrier.y < 0.5 || carrier.y > 99.5) {
+  if (carrier.y < 2.5 || carrier.y > 97.5) {
     const otherTeam = carrier.team === 'home' ? 'away' : 'home';
     const bx = Math.max(1, Math.min(99, carrier.x));
-    const by = carrier.y < 50 ? 1 : 99;
+    const by = carrier.y < 0 ? 1 : 99;
     let nearest = null, nd = Infinity;
     for (const p of s.players) {
       if (p.team !== otherTeam) continue;
@@ -1323,9 +1323,9 @@ function checkOutOfBounds(s) {
   }
 
   // Endlines (x)
-  if (carrier.x < 0.5 || carrier.x > 99.5) {
+  if (carrier.x < 2.5 || carrier.x > 97.5) {
     const half = s.clock.half;
-    const endX = carrier.x < 50 ? 0 : 100;
+    const endX = carrier.x < 0 ? 0 : 100;
     const carrierGoalX = getAttackGoalX(carrier.team, half);
     const isAttacking = Math.abs(carrierGoalX - endX) < 1;
     carrier.hasBall = false; carrier.burstTarget = null; carrier.route = [];
@@ -1909,8 +1909,8 @@ function App() {
     var py = e.clientY - rect.top;
     var ppu = pixelsPerUnitRef.current;
     var ypu = fieldDims.height / 100;
-    var gx = Math.max(1, Math.min(99, px / ppu));
-    var gy = Math.max(1, Math.min(99, py / ypu));
+    var gx = px / ppu;
+    var gy = py / ypu;
 
     // Skip ball action taps when tactically paused
     if (!state.tacticalPaused) {
@@ -2000,7 +2000,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.4.7'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.4.4 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2258,7 +2258,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.7'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.4 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },

@@ -1,5 +1,13 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.4.7 (2026-03-11)
+- OOB corner teleport fix: 7 targeted edits to prevent passes aimed at corners from teleporting the ball across the field
+- Pass-in-flight OOB: added toId guard to sideline and endline boundary checks -- targeted passes (toId set) no longer trigger in-flight OOB when trajectory grazes a boundary
+- Carrier sideline/endline OOB: fixed ternary thresholds from `< 0` to `< 50` -- throw-ins and goal kicks now happen on the correct side instead of always the far side
+- Carrier OOB trigger: tightened thresholds from 2.5/97.5 to 0.5/99.5 -- eliminates invisible death strip near sidelines where route waypoints clamp to 1 unit from edge
+- Through-ball coordinate clamping: gx/gy now clamped to 1-99 so tapping at field edges can't create out-of-bounds target coordinates
+- Version updated to Alpha 2.4.7
+
 ## Alpha 2.4.4 (2026-03-05)
 - Teleport zoom bug fix: MOVE tool now clears route, burstTarget, cooldownUntil, and settlingUntil when repositioning a player, preventing stale movement commands and frozen timers
 - Ball follows carrier: if the moved player has possession, the ball teleports with them
