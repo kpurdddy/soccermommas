@@ -354,11 +354,6 @@ function createInitialState() {
     saveDisplayTimer: 0,
     selectedDefender: null,
     tacticalPaused: false,
-    timeouts: { home: 5, away: 5 },
-    timeoutQueue: null,
-    timeoutActive: false,
-    timeoutCountdown: 0,
-    timeoutRequestedBy: null,
   };
 }
 
@@ -367,10 +362,8 @@ function updateGame(state, action) {
   switch (action.type) {
     case 'START_GAME': return startGame(state);
     case 'TICK': return gameTick(state);
-    case 'TACTICAL_PAUSE': return { ...state, tacticalPaused: true, clock: { ...state.clock, running: false } };
-    case 'TACTICAL_RESUME': return { ...state, tacticalPaused: false, timeoutActive: false, timeoutRequestedBy: null, clock: { ...state.clock, running: true } };
-    case 'REQUEST_TIMEOUT': return requestTimeout(state, action.team);
-    case 'CANCEL_TIMEOUT': return cancelTimeout(state, action.team);
+    case 'TACTICAL_PAUSE': return { ...state, tacticalPaused: true };
+    case 'TACTICAL_RESUME': return { ...state, tacticalPaused: false };
     case 'TAP_PLAYER': return tapPlayer(state, action.playerId);
     case 'TAP_FIELD': return tapField(state, action.x, action.y);
     case 'SHOOT': return executeShot(state, state.ball.carrier, action.aimX, action.aimY);
@@ -393,23 +386,7 @@ function startGame(state) {
 
 function gameTick(state) {
   if (state.phase === 'title' || state.phase === 'halftime' || state.phase === 'fulltime') return state;
-  if (state.tacticalPaused) {
-    // If timeout is active (multiplayer countdown), tick down
-    if (state.timeoutActive && state.timeoutCountdown > 0) {
-      var tState = { ...state, tick: state.tick + 1 };
-      tState.timeoutCountdown = state.timeoutCountdown - 1;
-      if (tState.timeoutCountdown <= 0) {
-        // Countdown expired -- resume play
-        tState.timeoutActive = false;
-        tState.timeoutRequestedBy = null;
-        tState.tacticalPaused = false;
-        tState.clock = { ...tState.clock, running: true };
-      }
-      return tState;
-    }
-    // Solo indefinite pause -- just return, no tick
-    return state;
-  }
+  if (state.tacticalPaused) return state;
 
   if (state.phase === 'kickoff_pause') {
     let s = { ...state, tick: state.tick + 1 };
@@ -421,8 +398,6 @@ function gameTick(state) {
 
   if (state.phase === 'goal_celebration') {
     let s = { ...state, tick: state.tick + 1 };
-    // Cancel any queued timeout -- goals are natural breaks
-    if (s.timeoutQueue) s.timeoutQueue = null;
     if (s.tick >= s.goalTimer) {
       s = resetForKickoff(s);
       return { ...s, phase: 'kickoff_pause', kickoffTimer: s.tick + KICKOFF_PAUSE_TICKS };
@@ -479,27 +454,6 @@ function gameTick(state) {
   s = updateLooseBall(s);
   s = cpuPossession(s);
   s = attachBallToCarrier(s);
-
-  // Check if a queued timeout should trigger
-  if (s.timeoutQueue && s.ball.carrier && !s.ball.loose && !s.passBall) {
-    var tqTeam = s.timeoutQueue.team;
-    // Only trigger if the carrier belongs to the team that requested the timeout
-    var tqCarrier = s.players.find(function(p) { return p.id === s.ball.carrier; });
-    if (tqCarrier && tqCarrier.team === tqTeam) {
-      s.timeoutQueue = null;
-      s.timeouts = { ...s.timeouts, [tqTeam]: s.timeouts[tqTeam] - 1 };
-      s.timeoutActive = true;
-      s.timeoutCountdown = 300;
-      s.timeoutRequestedBy = tqTeam;
-      s.tacticalPaused = true;
-      s.clock = { ...s.clock, running: false };
-      return s;
-    } else {
-      // Other team recovered -- cancel the queued timeout
-      s.timeoutQueue = null;
-    }
-  }
-
   s = checkOutOfBounds(s);
   if (s.phase !== 'play') return s;
   s = clampPlayers(s);
@@ -570,7 +524,7 @@ function updatePassBall(s) {
   pb.y += vy;
 
   // OOB check for pass in flight
-  if (!pb.toId && (pb.y < 0 || pb.y > 100)) {
+  if (pb.y < 0 || pb.y > 100) {
     // Sideline OOB — throw-in to opposite team
     var oobTeam = pb.fromTeam === 'home' ? 'away' : 'home';
     var oobBx = Math.max(1, Math.min(99, pb.x));
@@ -595,7 +549,7 @@ function updatePassBall(s) {
     s.cpuThreatDetectedTick = null; s.cpuNextStrategyTick = s.tick + 30;
     return s;
   }
-  if (!pb.toId && (pb.x < 0 || pb.x > 100)) {
+  if (pb.x < 0 || pb.x > 100) {
     // Endline OOB
     var endX = pb.x < 0 ? 0 : 100;
     var half = s.clock.half;
@@ -1350,54 +1304,7 @@ function startSecondHalf(state) {
     cpuThreatDetectedTick: null, cpuNextStrategyTick: 0,
     phase: 'kickoff_pause', kickoffTimer: state.tick + KICKOFF_PAUSE_TICKS,
     selectedDefender: null,
-    timeouts: { home: 5, away: 5 },
-    timeoutQueue: null,
-    timeoutActive: false,
-    timeoutCountdown: 0,
-    timeoutRequestedBy: null,
   };
-}
-
-function requestTimeout(state, team) {
-  if (state.phase !== 'play') return state;
-
-  // Solo mode: use simple indefinite pause (no countdown, no cost)
-  if (!netState.isMultiplayer) {
-    return { ...state, tacticalPaused: true, clock: { ...state.clock, running: false } };
-  }
-
-  // Multiplayer: check timeout budget
-  if (state.timeouts[team] <= 0) return state;
-
-  // Must be your team's possession to call timeout
-  if (state.ball.carrier) {
-    var carrierPlayer = state.players.find(function(p) { return p.id === state.ball.carrier; });
-    if (carrierPlayer && carrierPlayer.team !== team) return state;
-  }
-
-  // Check if ball is in possession (carrier set, not loose, no pass in flight)
-  var canTriggerNow = state.ball.carrier && !state.ball.loose && !state.passBall;
-
-  if (canTriggerNow) {
-    // Trigger immediately
-    var s = { ...state };
-    s.timeouts = { ...s.timeouts, [team]: s.timeouts[team] - 1 };
-    s.timeoutActive = true;
-    s.timeoutCountdown = 300; // 10 seconds at ~30fps
-    s.timeoutRequestedBy = team;
-    s.tacticalPaused = true;
-    s.clock = { ...s.clock, running: false };
-    return s;
-  } else {
-    // Queue it -- will trigger when THIS team gains possession
-    return { ...state, timeoutQueue: { team: team } };
-  }
-}
-
-function cancelTimeout(state, team) {
-  if (!state.timeoutQueue) return state;
-  if (state.timeoutQueue.team !== team) return state;
-  return { ...state, timeoutQueue: null };
 }
 
 function checkOutOfBounds(s) {
@@ -1406,10 +1313,10 @@ function checkOutOfBounds(s) {
   if (!carrier) return s;
 
   // Sidelines (y)
-  if (carrier.y < 0.5 || carrier.y > 99.5) {
+  if (carrier.y < 2.5 || carrier.y > 97.5) {
     const otherTeam = carrier.team === 'home' ? 'away' : 'home';
     const bx = Math.max(1, Math.min(99, carrier.x));
-    const by = carrier.y < 50 ? 1 : 99;
+    const by = carrier.y < 0 ? 1 : 99;
     let nearest = null, nd = Infinity;
     for (const p of s.players) {
       if (p.team !== otherTeam) continue;
@@ -1431,9 +1338,9 @@ function checkOutOfBounds(s) {
   }
 
   // Endlines (x)
-  if (carrier.x < 0.5 || carrier.x > 99.5) {
+  if (carrier.x < 2.5 || carrier.x > 97.5) {
     const half = s.clock.half;
-    const endX = carrier.x < 50 ? 0 : 100;
+    const endX = carrier.x < 0 ? 0 : 100;
     const carrierGoalX = getAttackGoalX(carrier.team, half);
     const isAttacking = Math.abs(carrierGoalX - endX) < 1;
     carrier.hasBall = false; carrier.burstTarget = null; carrier.route = [];
@@ -2041,8 +1948,8 @@ function App() {
     var py = e.clientY - rect.top;
     var ppu = pixelsPerUnitRef.current;
     var ypu = fieldDims.height / 100;
-    var gx = Math.max(1, Math.min(99, px / ppu));
-    var gy = Math.max(1, Math.min(99, py / ypu));
+    var gx = px / ppu;
+    var gy = py / ypu;
 
     // Skip ball action taps when tactically paused
     if (!state.tacticalPaused) {
@@ -2169,10 +2076,7 @@ function App() {
     return React.createElement('div', { className: 'landing-wrapper' },
       React.createElement('div', { className: 'title-screen' },
         React.createElement('h1', null, 'Soccer Mamas'),
-        React.createElement('div', { className: 'subtitle' },
-          'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
-        ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.5.0'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.4.6 -- test build'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2430,7 +2334,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.5.0'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.4.6 -- test build'),
       // HUD overlay - score/half/clock
       React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
@@ -2442,23 +2346,6 @@ function App() {
           React.createElement('span', { className: 'clock' }, clockStr)
         )
       ),
-
-      // Timeout counter HUD (multiplayer only)
-      netState.isMultiplayer && gameState.phase === 'play' ? React.createElement('div', {
-        key: 'timeout-counter',
-        style: {
-          position: 'absolute',
-          top: 'calc(4px + env(safe-area-inset-top, 0px))',
-          right: 'calc(8px + env(safe-area-inset-right, 0px))',
-          zIndex: 10,
-          background: 'rgba(0,0,0,0.35)',
-          borderRadius: '6px',
-          padding: '2px 8px',
-          color: '#ccc',
-          fontSize: '0.85em',
-          pointerEvents: 'none',
-        }
-      }, (localTeam === 'home' ? 'You: ' + gameState.timeouts.home + ' | Opp: ' + gameState.timeouts.away : 'You: ' + gameState.timeouts.away + ' | Opp: ' + gameState.timeouts.home)) : null,
 
       // GOAL! overlay
       gameState.phase === 'goal_celebration' ? React.createElement('div', {
@@ -2620,26 +2507,11 @@ function App() {
       ) : null,
 
       // Tactical pause button (solo and multiplayer -- not sandbox, which has its own toolbar)
-      !sandboxMode && gameState.phase === 'play' ? React.createElement('button', {
-        key: 'timeout-btn',
+      !sandboxMode && (gameState.phase === 'play' || gameState.phase === 'shot') ? React.createElement('button', {
+        key: 'tactical-pause-btn',
         onPointerDown: function(e) {
           e.stopPropagation();
-          if (gameState.timeoutActive) {
-            // During active countdown, button does nothing
-            return;
-          }
-          if (gameState.timeoutQueue && gameState.timeoutQueue.team === localTeam) {
-            // Cancel queued timeout
-            dispatchAndSend({ type: 'CANCEL_TIMEOUT', team: localTeam });
-            return;
-          }
-          if (gameState.tacticalPaused) {
-            // Resume from pause (solo indefinite or post-countdown)
-            dispatchAndSend({ type: 'TACTICAL_RESUME' });
-            return;
-          }
-          // Request timeout (solo = instant free pause, multiplayer = countdown)
-          dispatchAndSend({ type: 'REQUEST_TIMEOUT', team: localTeam });
+          dispatchAndSend({ type: gameState.tacticalPaused ? 'TACTICAL_RESUME' : 'TACTICAL_PAUSE' });
         },
         style: {
           position: 'absolute',
@@ -2647,7 +2519,7 @@ function App() {
           right: 'calc(12px + env(safe-area-inset-right, 0px))',
           zIndex: 20,
           pointerEvents: 'auto',
-          background: gameState.timeoutQueue ? '#b45309' : gameState.timeoutActive ? '#7c3aed' : gameState.tacticalPaused ? '#059669' : 'rgba(0,0,0,0.55)',
+          background: gameState.tacticalPaused ? '#059669' : 'rgba(0,0,0,0.55)',
           color: 'white',
           border: '1px solid rgba(255,255,255,0.3)',
           borderRadius: '6px',
@@ -2656,14 +2528,11 @@ function App() {
           fontSize: '0.95em',
           cursor: 'pointer',
         }
-      }, gameState.timeoutQueue ? 'PENDING...'
-        : gameState.timeoutActive ? ('TIMEOUT ' + Math.ceil(gameState.timeoutCountdown / 30) + 's')
-        : gameState.tacticalPaused ? '\u25B6 RESUME'
-        : '\u23F8 PAUSE') : null,
+      }, gameState.tacticalPaused ? '\u25B6 RESUME' : '\u23F8 PAUSE') : null,
 
       // Tactical pause overlay (not shown in sandbox -- sandbox has its own toolbar)
       gameState.tacticalPaused && !sandboxMode ? React.createElement('div', {
-        key: 'timeout-overlay',
+        key: 'tactical-pause-overlay',
         style: {
           position: 'absolute',
           top: 0, left: 0, width: '100%', height: '100%',
@@ -2673,15 +2542,6 @@ function App() {
           zIndex: 15,
         }
       },
-        gameState.timeoutActive ? React.createElement('div', {
-          style: {
-            fontSize: Math.max(48, fw * 0.08) + 'px',
-            fontWeight: 'bold',
-            color: '#ffd700',
-            textShadow: '0 2px 8px rgba(0,0,0,0.8)',
-            fontVariantNumeric: 'tabular-nums',
-          }
-        }, Math.ceil(gameState.timeoutCountdown / 30)) : null,
         React.createElement('div', {
           style: {
             fontSize: Math.max(28, fw * 0.05) + 'px',
@@ -2691,7 +2551,7 @@ function App() {
             letterSpacing: '4px',
             marginBottom: '8px',
           }
-        }, gameState.timeoutActive ? 'TIMEOUT' : 'PAUSED'),
+        }, 'PAUSED'),
         React.createElement('div', {
           style: {
             fontSize: Math.max(14, fw * 0.025) + 'px',
