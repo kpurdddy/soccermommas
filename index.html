@@ -311,6 +311,133 @@ const AWAY_FORMATION = [
   { role: 'ST', x: 30, y: 65 }, { role: 'ST', x: 30, y: 35 },
 ];
 
+// ==================== DRILL DATA ====================
+var DRILLS = [
+  {
+    id: 'rondo_4v2',
+    name: 'Rondo (4v2)',
+    description: 'Keep possession under pressure',
+    teach: 'Quick passing, movement off the ball, reading space',
+    successType: 'passes',
+    successCount: 6,
+    zone: { x: 30, y: 25, w: 40, h: 50 },
+    targetZone: null,
+    players: [
+      { team: 'home', role: 'CM', x: 32, y: 30 },
+      { team: 'home', role: 'CM', x: 68, y: 30 },
+      { team: 'home', role: 'CM', x: 32, y: 70 },
+      { team: 'home', role: 'CM', x: 68, y: 70 },
+      { team: 'away', role: 'CM', x: 46, y: 45 },
+      { team: 'away', role: 'CM', x: 54, y: 55 },
+    ],
+    ballCarrierIndex: 0,
+    hint: 'Complete 6 passes without losing the ball. Move after you pass!',
+  },
+  {
+    id: 'attack_3v2',
+    name: '3v2 Attack',
+    description: 'Create a scoring chance with the extra player',
+    teach: 'Overlapping runs, finding the extra player, finishing',
+    successType: 'goal',
+    successCount: 0,
+    zone: { x: 55, y: 10, w: 45, h: 80 },
+    targetZone: null,
+    players: [
+      { team: 'home', role: 'ST', x: 55, y: 50 },
+      { team: 'home', role: 'RM', x: 50, y: 25 },
+      { team: 'home', role: 'LM', x: 50, y: 75 },
+      { team: 'away', role: 'CB', x: 75, y: 40 },
+      { team: 'away', role: 'CB', x: 75, y: 60 },
+      { team: 'away', role: 'GK', x: 96, y: 50 },
+    ],
+    ballCarrierIndex: 0,
+    hint: 'You have 3 attackers vs 2 defenders. Find the open player and score!',
+  },
+  {
+    id: 'give_and_go',
+    name: 'Give-and-Go',
+    description: 'Wall pass into space and finish',
+    teach: 'One-two passing, timing runs, off-the-ball movement',
+    successType: 'goal',
+    successCount: 0,
+    zone: { x: 40, y: 20, w: 60, h: 60 },
+    targetZone: null,
+    players: [
+      { team: 'home', role: 'CM', x: 45, y: 50 },
+      { team: 'home', role: 'ST', x: 65, y: 40 },
+      { team: 'home', role: 'ST', x: 65, y: 60 },
+      { team: 'away', role: 'CB', x: 60, y: 50 },
+      { team: 'away', role: 'CB', x: 78, y: 50 },
+      { team: 'away', role: 'GK', x: 96, y: 50 },
+    ],
+    ballCarrierIndex: 0,
+    hint: 'Pass to a teammate, then immediately run into space for the return ball. Score!',
+  },
+  {
+    id: 'build_out',
+    name: 'Build Out From Back',
+    description: 'Pass through pressure from GK to attack',
+    teach: 'Patience, passing under pressure, reading the press',
+    successType: 'zone',
+    successCount: 0,
+    zone: { x: 0, y: 0, w: 100, h: 100 },
+    targetZone: { x: 70, y: 20, w: 30, h: 60 },
+    players: [
+      { team: 'home', role: 'GK', x: 5, y: 50 },
+      { team: 'home', role: 'CB', x: 18, y: 35 },
+      { team: 'home', role: 'CB', x: 18, y: 65 },
+      { team: 'home', role: 'CM', x: 35, y: 50 },
+      { team: 'home', role: 'ST', x: 55, y: 50 },
+      { team: 'away', role: 'CM', x: 25, y: 40 },
+      { team: 'away', role: 'CM', x: 25, y: 60 },
+      { team: 'away', role: 'ST', x: 15, y: 50 },
+    ],
+    ballCarrierIndex: 0,
+    hint: 'Get the ball from the goalkeeper into the attacking zone (highlighted green). Pass through the press!',
+  },
+  {
+    id: 'switch_play',
+    name: 'Switch the Play',
+    description: 'Move the ball to the open side',
+    teach: 'Seeing the whole field, switching play, exploiting space',
+    successType: 'zone',
+    successCount: 0,
+    zone: { x: 0, y: 0, w: 100, h: 100 },
+    targetZone: { x: 60, y: 65, w: 40, h: 35 },
+    players: [
+      { team: 'home', role: 'CM', x: 40, y: 25 },
+      { team: 'home', role: 'CM', x: 50, y: 50 },
+      { team: 'home', role: 'RM', x: 55, y: 80 },
+      { team: 'home', role: 'ST', x: 70, y: 50 },
+      { team: 'away', role: 'CB', x: 55, y: 25 },
+      { team: 'away', role: 'CB', x: 60, y: 35 },
+      { team: 'away', role: 'CM', x: 45, y: 35 },
+    ],
+    ballCarrierIndex: 0,
+    hint: 'The defense is packed on the left. Switch the ball to the open right side (highlighted green)!',
+  },
+  {
+    id: 'overlap_run',
+    name: 'Overlap Run',
+    description: 'Use an overlapping run to create 2v1 on the wing',
+    teach: 'Off-the-ball runs, timing, width in attack',
+    successType: 'goal',
+    successCount: 0,
+    zone: { x: 40, y: 0, w: 60, h: 50 },
+    targetZone: null,
+    players: [
+      { team: 'home', role: 'RM', x: 50, y: 25 },
+      { team: 'home', role: 'RB', x: 40, y: 15 },
+      { team: 'home', role: 'ST', x: 70, y: 45 },
+      { team: 'away', role: 'LB', x: 65, y: 20 },
+      { team: 'away', role: 'CB', x: 80, y: 45 },
+      { team: 'away', role: 'GK', x: 96, y: 50 },
+    ],
+    ballCarrierIndex: 0,
+    hint: 'Draw a route for the fullback to overlap around the winger. Create a 2v1 and score!',
+  },
+];
+
 // ==================== INITIAL STATE ====================
 function createInitialState() {
   const players = [];
@@ -359,7 +486,65 @@ function createInitialState() {
     timeoutActive: false,
     timeoutCountdown: 0,
     timeoutRequestedBy: null,
+    drillMode: false,
+    drillId: null,
+    drillSuccessType: null,
+    drillSuccessCount: 0,
+    drillTargetZone: null,
+    drillPassCount: 0,
+    drillComplete: false,
+    drillFailed: false,
+    drillMessage: '',
   };
+}
+
+function startDrill(unusedState, drillId) {
+  var drill = DRILLS.find(function(d) { return d.id === drillId; });
+  if (!drill) return createInitialState();
+
+  // Start from a full initial state so no fields are missing
+  var base = createInitialState();
+
+  // Build drill-specific players
+  var players = [];
+  var homeIdx = 0;
+  var awayIdx = 0;
+  for (var i = 0; i < drill.players.length; i++) {
+    var dp = drill.players[i];
+    var id;
+    if (dp.team === 'home') { id = 'home_' + homeIdx; homeIdx++; }
+    else { id = 'away_' + awayIdx; awayIdx++; }
+    players.push({
+      id: id, team: dp.team, role: dp.role,
+      x: dp.x, y: dp.y, homeX: dp.x, homeY: dp.y,
+      vx: 0, vy: 0, hasBall: i === drill.ballCarrierIndex,
+      burstTarget: null, burstCooldownUntil: 0, route: [],
+      settlingUntil: 0, cooldownUntil: 0,
+    });
+  }
+
+  var carrierId = players[drill.ballCarrierIndex].id;
+  var carrierPlayer = players[drill.ballCarrierIndex];
+
+  // Overlay drill fields on top of the full base state
+  return Object.assign({}, base, {
+    players: players,
+    ball: { x: carrierPlayer.x, y: carrierPlayer.y, carrier: carrierId, loose: false,
+            velocity: null, lastCarrierId: null, looseTimer: 0 },
+    possession: 'home',
+    phase: 'play',
+    tacticalPaused: true,
+    clock: { elapsed: 0, half: 1, running: true },
+    drillMode: true,
+    drillId: drillId,
+    drillSuccessType: drill.successType,
+    drillSuccessCount: drill.successCount || 0,
+    drillTargetZone: drill.targetZone || null,
+    drillPassCount: 0,
+    drillComplete: false,
+    drillFailed: false,
+    drillMessage: drill.hint,
+  });
 }
 
 // ==================== PURE UPDATE FUNCTION ====================
@@ -383,6 +568,9 @@ function updateGame(state, action) {
     case 'TELEPORT_ENTITY': return teleportEntity(state, action);
     case 'START_SECOND_HALF': return startSecondHalf(state);
     case 'PLAY_AGAIN': return createInitialState();
+    case 'START_DRILL': return startDrill(state, action.drillId);
+    case 'RESET_DRILL': return startDrill(state, state.drillId);
+    case 'EXIT_DRILL': return createInitialState();
     default: return state;
   }
 }
@@ -423,6 +611,17 @@ function gameTick(state) {
     let s = { ...state, tick: state.tick + 1 };
     // Cancel any queued timeout -- goals are natural breaks
     if (s.timeoutQueue) s.timeoutQueue = null;
+    // Drill mode: intercept end of goal celebration for ALL drill types
+    if (s.drillMode && s.tick >= s.goalTimer) {
+      if (s.drillComplete) {
+        // Goal drill completed -- pause for result overlay
+        return { ...s, phase: 'play', tacticalPaused: true, clock: { ...s.clock, running: false } };
+      } else {
+        // Non-goal drill (e.g. rondo) -- scoring is not the objective
+        return { ...s, phase: 'play', tacticalPaused: true, clock: { ...s.clock, running: false },
+          drillFailed: true, drillMessage: 'Goal! But the drill objective was different. Try again.' };
+      }
+    }
     if (s.tick >= s.goalTimer) {
       s = resetForKickoff(s);
       return { ...s, phase: 'kickoff_pause', kickoffTimer: s.tick + KICKOFF_PAUSE_TICKS };
@@ -464,10 +663,10 @@ function gameTick(state) {
 
   // Check halftime / fulltime
   const gameSeconds = s.clock.elapsed * TICK_MS / 1000 * GAME_TIME_SCALE;
-  if (s.clock.half === 1 && gameSeconds >= 2700) {
+  if (!s.drillMode && s.clock.half === 1 && gameSeconds >= 2700) {
     return { ...s, phase: 'halftime', clock: { ...s.clock, running: false } };
   }
-  if (s.clock.half === 2 && gameSeconds >= 5400) {
+  if (!s.drillMode && s.clock.half === 2 && gameSeconds >= 5400) {
     return { ...s, phase: 'fulltime', clock: { ...s.clock, running: false } };
   }
 
@@ -548,6 +747,14 @@ function updatePassBall(s) {
       s.ball.lastCarrierId = null;
     }
     s.passBall = null;
+    // Drill mode: count completed pass
+    if (s.drillMode && !s.drillComplete && !s.drillFailed) {
+      var newPassCount = (s.drillPassCount || 0) + 1;
+      s = { ...s, drillPassCount: newPassCount };
+      if (s.drillSuccessType === 'passes' && newPassCount >= s.drillSuccessCount) {
+        s = { ...s, drillComplete: true, drillMessage: 'DRILL COMPLETE! ' + newPassCount + ' passes!', tacticalPaused: true };
+      }
+    }
     return s;
   }
 
@@ -568,6 +775,16 @@ function updatePassBall(s) {
   const vy = (dy / d) * pb.adjustedSpeed;
   pb.x += vx;
   pb.y += vy;
+
+  // Drill mode: pass out of bounds = fail
+  if (s.drillMode && !pb.toId && (pb.y < 0 || pb.y > 100 || pb.x < 0 || pb.x > 100)) {
+    s.passBall = null;
+    s.ball = { ...s.ball, x: Math.max(1, Math.min(99, pb.x)), y: Math.max(1, Math.min(99, pb.y)), carrier: null, loose: true, looseTimer: s.tick + LOOSE_BALL_TICKS };
+    if (!s.drillComplete) {
+      s = { ...s, drillFailed: true, drillMessage: 'Ball went out of bounds!', tacticalPaused: true };
+    }
+    return s;
+  }
 
   // OOB check for pass in flight
   if (!pb.toId && (pb.y < 0 || pb.y > 100)) {
@@ -656,6 +873,13 @@ function updatePassBall(s) {
       s.selectedDefender = null;
       s.cpuThreatDetectedTick = null;
       s.cpuNextStrategyTick = s.tick + 30;
+      if (s.drillMode && !s.drillComplete) {
+        var intMsg = 'Intercepted! Lost possession.';
+        if (s.drillSuccessType === 'passes') {
+          intMsg = 'Intercepted! You completed ' + (s.drillPassCount || 0) + ' of ' + s.drillSuccessCount + ' passes.';
+        }
+        s = { ...s, drillFailed: true, drillMessage: intMsg, tacticalPaused: true };
+      }
       return s;
     }
 
@@ -678,6 +902,13 @@ function updatePassBall(s) {
       s.selectedDefender = null;
       s.cpuThreatDetectedTick = null;
       s.cpuNextStrategyTick = s.tick + 30;
+      if (s.drillMode && !s.drillComplete) {
+        var intMsg2 = 'Intercepted! Lost possession.';
+        if (s.drillSuccessType === 'passes') {
+          intMsg2 = 'Intercepted! You completed ' + (s.drillPassCount || 0) + ' of ' + s.drillSuccessCount + ' passes.';
+        }
+        s = { ...s, drillFailed: true, drillMessage: intMsg2, tacticalPaused: true };
+      }
       return s;
     }
   }
@@ -816,6 +1047,18 @@ function attachBallToCarrier(s) {
         s.ball.x = carrier.x;
         s.ball.y = carrier.y;
       }
+      // Drill zone check
+      if (s.drillMode && !s.drillComplete && !s.drillFailed && s.ball.carrier && s.drillSuccessType === 'zone' && s.drillTargetZone) {
+        var tz = s.drillTargetZone;
+        var bzx = s.ball.x;
+        var bzy = s.ball.y;
+        if (bzx >= tz.x && bzx <= tz.x + tz.w && bzy >= tz.y && bzy <= tz.y + tz.h) {
+          var zCarrier = s.players.find(function(p) { return p.id === s.ball.carrier; });
+          if (zCarrier && zCarrier.team === 'home') {
+            s = { ...s, drillComplete: true, drillMessage: 'Ball delivered! Drill complete!', tacticalPaused: true };
+          }
+        }
+      }
     }
   }
   return s;
@@ -861,6 +1104,14 @@ function checkTackles(s) {
       s.selectedDefender = null;
       s.cpuThreatDetectedTick = null;
       s.cpuNextStrategyTick = s.tick + 30;
+      // Drill mode: losing possession = fail
+      if (s.drillMode && !s.drillComplete) {
+        var tackleMsg = 'Tackled! Lost possession.';
+        if (s.drillSuccessType === 'passes') {
+          tackleMsg = 'Tackled! You completed ' + (s.drillPassCount || 0) + ' of ' + s.drillSuccessCount + ' passes.';
+        }
+        s = { ...s, drillFailed: true, drillMessage: tackleMsg, tacticalPaused: true };
+      }
 
       // Auto-burst: winning player moves away from contact
       var dx = p.x - carrier.x;
@@ -965,6 +1216,7 @@ function updateLooseBall(s) {
 }
 
 function cpuPossession(s) {
+  if (s.drillMode) return s;
   if (netState.isMultiplayer && s.possession === 'away') return s;
   if (s.possession !== 'away') return s;
   if (!s.ball.carrier || !s.ball.carrier.startsWith('away')) return s;
@@ -1239,6 +1491,12 @@ function updateShotAnimation(state) {
       s.lastGoalBy = s.shot.shootingTeam;
       s.phase = 'goal_celebration';
       s.goalTimer = s.tick + GOAL_CELEBRATION_TICKS;
+      // Drill mode: goal = success for goal-based drills
+      if (s.drillMode && !s.drillComplete) {
+        if (s.drillSuccessType === 'goal') {
+          s = { ...s, drillComplete: true, drillMessage: 'GOAL! Drill complete!' };
+        }
+      }
       s.shot = null;
     } else if (s.shot.result === 'save') {
       var reboundX = s.shot.targetX < 50 ? 10 : 90;
@@ -1401,6 +1659,33 @@ function cancelTimeout(state, team) {
 }
 
 function checkOutOfBounds(s) {
+  // In drill mode, clamp everything to field -- no throw-ins, goal kicks, or corners
+  if (s.drillMode) {
+    // Clamp carrier
+    if (s.ball.carrier) {
+      var dcIdx = s.players.findIndex(function(p) { return p.id === s.ball.carrier; });
+      if (dcIdx >= 0) {
+        var dcp = s.players[dcIdx];
+        if (dcp.x < 1 || dcp.x > 99 || dcp.y < 1 || dcp.y > 99) {
+          s = { ...s, players: s.players.map(function(p) { return { ...p }; }) };
+          s.players[dcIdx].x = Math.max(1, Math.min(99, s.players[dcIdx].x));
+          s.players[dcIdx].y = Math.max(1, Math.min(99, s.players[dcIdx].y));
+          s.ball = { ...s.ball, x: s.players[dcIdx].x, y: s.players[dcIdx].y };
+        }
+      }
+    }
+    // Clamp loose ball -- or fail if it hits boundaries
+    if (s.ball.loose) {
+      if (s.ball.x < 1 || s.ball.x > 99 || s.ball.y < 1 || s.ball.y > 99) {
+        s = { ...s, ball: { ...s.ball, x: Math.max(1, Math.min(99, s.ball.x)), y: Math.max(1, Math.min(99, s.ball.y)) } };
+        if (!s.drillComplete) {
+          s = { ...s, drillFailed: true, drillMessage: 'Ball went out of bounds!', tacticalPaused: true };
+        }
+        return s;
+      }
+    }
+    return s;
+  }
   if (!s.ball.carrier || s.ball.loose || s.passBall) return s;
   const carrier = s.players.find(p => p.id === s.ball.carrier);
   if (!carrier) return s;
@@ -2172,7 +2457,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.5.0'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.6.0'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2193,7 +2478,11 @@ function App() {
               dispatch({ type: 'START_GAME' });
             },
             style: { background: '#059669' }
-          }, 'SANDBOX')
+          }, 'SANDBOX'),
+          React.createElement('button', {
+            onClick: function() { setTitleMode('drill_select'); },
+            style: { background: '#d97706' }
+          }, 'DRILLS')
         ) : null,
         titleMode === 'hosting' ? React.createElement('div', { style: { textAlign: 'center' } },
           React.createElement('div', { style: { fontSize: '1.1em', color: '#ccc', marginBottom: '16px' } }, 'Waiting for Player 2...'),
@@ -2232,6 +2521,53 @@ function App() {
           React.createElement('button', {
             onClick: function() { cleanupNet(); setTitleMode('menu'); dispatch({ type: 'PLAY_AGAIN' }); }
           }, 'BACK TO MENU')
+        ) : null,
+        titleMode === 'drill_select' ? React.createElement('div', {
+          style: { textAlign: 'center', maxWidth: '500px' }
+        },
+          React.createElement('div', {
+            style: { fontSize: '1.5em', fontWeight: 'bold', color: '#ffd700', marginBottom: '20px' }
+          }, 'Choose a Drill'),
+          React.createElement('div', {
+            style: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }
+          },
+            DRILLS.map(function(drill) {
+              return React.createElement('div', {
+                key: drill.id,
+                onClick: function() {
+                  AudioSys.init();
+                  AudioSys.whistle();
+                  sandboxMode = false;
+                  localTeam = 'home';
+                  netState.isMultiplayer = false;
+                  dispatch({ type: 'START_DRILL', drillId: drill.id });
+                },
+                style: {
+                  background: 'rgba(255,255,255,0.08)',
+                  borderLeft: '4px solid #d97706',
+                  borderRadius: '8px',
+                  padding: '14px 18px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'background 0.2s',
+                }
+              },
+                React.createElement('div', {
+                  style: { color: 'white', fontWeight: 'bold', fontSize: '1.1em', marginBottom: '4px' }
+                }, drill.name),
+                React.createElement('div', {
+                  style: { color: '#ccc', fontSize: '0.9em', marginBottom: '2px' }
+                }, drill.description),
+                React.createElement('div', {
+                  style: { color: '#999', fontSize: '0.8em', fontStyle: 'italic' }
+                }, 'Teaches: ' + drill.teach)
+              );
+            })
+          ),
+          React.createElement('button', {
+            onClick: function() { setTitleMode('menu'); },
+            style: { background: '#555', padding: '10px 24px', fontSize: '1em' }
+          }, 'BACK')
         ) : null
       ),
       React.createElement('div', { className: 'landing-content' },
@@ -2337,6 +2673,32 @@ function App() {
           rx: 4,
         }) : null,
 
+        // Drill zone outline and target zone
+        gameState.drillMode ? (function() {
+          var drill = DRILLS.find(function(d) { return d.id === gameState.drillId; });
+          if (!drill) return null;
+          var elements = [];
+          if (drill.zone.w < 100 || drill.zone.h < 100) {
+            elements.push(React.createElement('rect', {
+              key: 'drill-zone',
+              x: drill.zone.x * ppu, y: drill.zone.y * ypu,
+              width: drill.zone.w * ppu, height: drill.zone.h * ypu,
+              fill: 'none', stroke: 'rgba(217,119,6,0.5)', strokeWidth: 2,
+              strokeDasharray: '8 4', rx: 4,
+            }));
+          }
+          if (drill.targetZone) {
+            elements.push(React.createElement('rect', {
+              key: 'drill-target',
+              x: drill.targetZone.x * ppu, y: drill.targetZone.y * ypu,
+              width: drill.targetZone.w * ppu, height: drill.targetZone.h * ypu,
+              fill: 'rgba(34,197,94,0.15)', stroke: 'rgba(34,197,94,0.6)',
+              strokeWidth: 2, rx: 4,
+            }));
+          }
+          return elements;
+        })() : null,
+
         // Ball trail
         ...(gameState.passBall ? gameState.passBall.trail.map((t, i) =>
           React.createElement('circle', {
@@ -2347,7 +2709,7 @@ function App() {
         ) : []),
 
         // Route lines for players with active routes
-        ...gameState.players.filter(function(p) { return (sandboxMode || p.team === localTeam) && p.route && p.route.length > 0; }).map(function(p) {
+        ...gameState.players.filter(function(p) { return (sandboxMode || gameState.drillMode || p.team === localTeam) && p.route && p.route.length > 0; }).map(function(p) {
           var points = (p.x * ppu) + ',' + (p.y * ypu);
           for (var i = 0; i < p.route.length; i++) {
             points += ' ' + (p.route[i].x * ppu) + ',' + (p.route[i].y * ypu);
@@ -2364,7 +2726,7 @@ function App() {
         }),
 
         // Route waypoint dots
-        ...gameState.players.filter(function(p) { return (sandboxMode || p.team === localTeam) && p.route && p.route.length > 0; }).reduce(function(acc, p) {
+        ...gameState.players.filter(function(p) { return (sandboxMode || gameState.drillMode || p.team === localTeam) && p.route && p.route.length > 0; }).reduce(function(acc, p) {
           p.route.forEach(function(wp, i) {
             acc.push(React.createElement('circle', {
               key: 'wp-' + p.id + '-' + i,
@@ -2430,9 +2792,9 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.5.0'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.6.0'),
       // HUD overlay - score/half/clock
-      React.createElement('div', { className: 'hud-overlay' },
+      !gameState.drillMode ? React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
           React.createElement('span', { className: 'half' },
             (gameState.possession === 'home' ? '\u{1F7E6} ' : '\u{1F7E5} ') + halfStr),
@@ -2441,7 +2803,7 @@ function App() {
           ),
           React.createElement('span', { className: 'clock' }, clockStr)
         )
-      ),
+      ) : null,
 
       // Timeout counter HUD (multiplayer only)
       netState.isMultiplayer && gameState.phase === 'play' ? React.createElement('div', {
@@ -2619,6 +2981,105 @@ function App() {
         }, 'ROUTE')
       ) : null,
 
+      // Drill mode HUD
+      gameState.drillMode && gameState.phase === 'play' ? React.createElement('div', {
+        key: 'drill-hud',
+        style: {
+          position: 'absolute',
+          top: 'calc(40px + env(safe-area-inset-top, 0px))',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 20,
+          pointerEvents: 'none',
+          textAlign: 'center',
+        }
+      },
+        React.createElement('div', {
+          style: {
+            background: 'rgba(0,0,0,0.6)',
+            color: '#ffd700',
+            padding: '4px 16px',
+            borderRadius: '6px',
+            fontWeight: 'bold',
+            fontSize: '0.9em',
+            marginBottom: '4px',
+            display: 'inline-block',
+          }
+        }, (function() {
+          var drill = DRILLS.find(function(d) { return d.id === gameState.drillId; });
+          return drill ? drill.name : '';
+        })()),
+        gameState.drillSuccessType === 'passes' ? React.createElement('div', {
+          style: {
+            background: 'rgba(0,0,0,0.5)',
+            color: 'white',
+            padding: '2px 12px',
+            borderRadius: '4px',
+            fontSize: '0.85em',
+            display: 'inline-block',
+          }
+        }, 'Passes: ' + (gameState.drillPassCount || 0) + ' / ' + gameState.drillSuccessCount) : null
+      ) : null,
+
+      // Drill complete/fail overlay (wait for goal celebration to finish before showing)
+      gameState.drillMode && (gameState.drillComplete || gameState.drillFailed) && gameState.phase !== 'goal_celebration' ? React.createElement('div', {
+        key: 'drill-result',
+        style: {
+          position: 'absolute',
+          top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.5)',
+          zIndex: 100,
+        }
+      },
+        React.createElement('div', {
+          style: {
+            fontSize: Math.max(28, fw * 0.05) + 'px',
+            fontWeight: 'bold',
+            color: gameState.drillComplete ? '#ffd700' : '#ff6b6b',
+            textShadow: '0 2px 8px rgba(0,0,0,0.8)',
+            marginBottom: '8px',
+          }
+        }, gameState.drillComplete ? 'COMPLETE!' : 'TRY AGAIN'),
+        React.createElement('div', {
+          style: {
+            fontSize: Math.max(14, fw * 0.025) + 'px',
+            color: '#ccc',
+            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+            marginBottom: '20px',
+            maxWidth: '80%',
+            textAlign: 'center',
+          }
+        }, gameState.drillMessage),
+        React.createElement('div', { style: { display: 'flex', gap: '12px' } },
+          React.createElement('button', {
+            onPointerDown: function(e) {
+              e.stopPropagation();
+              dispatch({ type: 'RESET_DRILL' });
+            },
+            style: {
+              fontSize: '1.1em', padding: '10px 28px',
+              background: '#d97706', color: 'white',
+              border: 'none', borderRadius: '8px',
+              cursor: 'pointer', fontWeight: 'bold',
+            }
+          }, 'RESET'),
+          React.createElement('button', {
+            onPointerDown: function(e) {
+              e.stopPropagation();
+              dispatch({ type: 'EXIT_DRILL' });
+            },
+            style: {
+              fontSize: '1.1em', padding: '10px 28px',
+              background: '#555', color: 'white',
+              border: 'none', borderRadius: '8px',
+              cursor: 'pointer', fontWeight: 'bold',
+            }
+          }, 'BACK TO DRILLS')
+        )
+      ) : null,
+
       // Tactical pause button (solo and multiplayer -- not sandbox, which has its own toolbar)
       !sandboxMode && gameState.phase === 'play' ? React.createElement('button', {
         key: 'timeout-btn',
@@ -2698,7 +3159,17 @@ function App() {
             color: '#ccc',
             textShadow: '0 1px 4px rgba(0,0,0,0.8)',
           }
-        }, 'Draw routes for your players')
+        }, 'Draw routes for your players'),
+        gameState.drillMode && gameState.drillMessage && !gameState.drillComplete && !gameState.drillFailed ? React.createElement('div', {
+          style: {
+            fontSize: Math.max(12, fw * 0.022) + 'px',
+            color: '#ffd700',
+            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+            marginTop: '8px',
+            maxWidth: '80%',
+            textAlign: 'center',
+          }
+        }, gameState.drillMessage) : null
       ) : null,
     ),
 
