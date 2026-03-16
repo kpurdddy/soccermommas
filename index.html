@@ -1356,53 +1356,28 @@ function cpuPass(s, carrier, type) {
   s.ball.carrier = null;
   s.passIdCounter = (s.passIdCounter || 0) + 1;
 
+  // Always compute the lead point first
+  var cpuLead = calculateLeadPosition(carrier.x, carrier.y, target);
+  var cpuLeadX = cpuLead.x;
+  var cpuLeadY = cpuLead.y;
+
   var isErrant = gameRNG() < CPU_PASS_ERROR_CHANCE;
   if (isErrant) {
-    const angle = gameRNG() * Math.PI * 2;
-    const errDist = 2 + gameRNG();
+    // Scatter around the LEAD point, not the receiver's current position
+    var angle = gameRNG() * Math.PI * 2;
+    var errDist = 2 + gameRNG();
     s.passBall = {
       fromX: carrier.x, fromY: carrier.y,
       toId: null,
       targetPos: {
-        x: Math.max(1, Math.min(99, target.x + Math.cos(angle) * errDist)),
-        y: Math.max(1, Math.min(99, target.y + Math.sin(angle) * errDist)),
+        x: Math.max(1, Math.min(99, cpuLeadX + Math.cos(angle) * errDist)),
+        y: Math.max(1, Math.min(99, cpuLeadY + Math.sin(angle) * errDist)),
       },
       x: carrier.x, y: carrier.y,
       trail: [], fromTeam: 'away',
       passId: s.passIdCounter, checkedBy: new Set(),
     };
   } else {
-    // Compute intercept point for CPU pass
-    var cpuPassDist = Math.sqrt((carrier.x - target.x) * (carrier.x - target.x) + (carrier.y - target.y) * (carrier.y - target.y));
-    // Smooth speed curve: 2.5x at 0 units, tapering linearly to 1.0x at 30+ units. No cliffs.
-    var cpuSpeedMult = Math.max(1.0, 2.5 - (1.5 * (cpuPassDist / 30)));
-    var cpuEstSpeed = PASS_SPEED * cpuSpeedMult;
-    var cpuEstTicks = cpuEstSpeed > 0 ? cpuPassDist / cpuEstSpeed : 0;
-    var cpuLeadX = target.x;
-    var cpuLeadY = target.y;
-    if (target.route && target.route.length > 0) {
-      var crTarget = target.route[0];
-      var crdx = crTarget.x - target.x;
-      var crdy = crTarget.y - target.y;
-      var crdist = Math.sqrt(crdx * crdx + crdy * crdy);
-      if (crdist > 0.1) {
-        var crProjDist = Math.min(crdist, BURST_SPEED * cpuEstTicks);
-        cpuLeadX = target.x + (crdx / crdist) * crProjDist;
-        cpuLeadY = target.y + (crdy / crdist) * crProjDist;
-      }
-    } else if (target.burstTarget) {
-      var cbdx = target.burstTarget.x - target.x;
-      var cbdy = target.burstTarget.y - target.y;
-      var cbdist = Math.sqrt(cbdx * cbdx + cbdy * cbdy);
-      if (cbdist > 0.1) {
-        var cbProjDist = Math.min(cbdist, BURST_SPEED * cpuEstTicks);
-        cpuLeadX = target.x + (cbdx / cbdist) * cbProjDist;
-        cpuLeadY = target.y + (cbdy / cbdist) * cbProjDist;
-      }
-    }
-    cpuLeadX = Math.max(1, Math.min(99, cpuLeadX));
-    cpuLeadY = Math.max(1, Math.min(99, cpuLeadY));
-
     s.passBall = {
       fromX: carrier.x, fromY: carrier.y,
       toId: target.id,
@@ -1994,6 +1969,78 @@ function throughBall(state, x, y) {
   return s;
 }
 
+function calculateLeadPosition(carrierX, carrierY, target) {
+  // Determine if the receiver is moving at all
+  var hasRoute = target.route && target.route.length > 0;
+  var hasBurst = !hasRoute && target.burstTarget;
+  if (!hasRoute && !hasBurst) {
+    return { x: target.x, y: target.y };
+  }
+
+  // traceMovement: walk the receiver along their path for a given number of ticks.
+  // Returns the position they would reach.
+  function traceMovement(ticks) {
+    var remaining = BURST_SPEED * ticks;
+    var cx = target.x;
+    var cy = target.y;
+
+    if (hasRoute) {
+      // Walk segment by segment through the route waypoints
+      for (var i = 0; i < target.route.length; i++) {
+        var wp = target.route[i];
+        var sdx = wp.x - cx;
+        var sdy = wp.y - cy;
+        var segDist = Math.sqrt(sdx * sdx + sdy * sdy);
+        if (segDist < 0.1) continue; // skip near-zero segments
+        if (remaining <= segDist) {
+          // Stop partway along this segment
+          cx += (sdx / segDist) * remaining;
+          cy += (sdy / segDist) * remaining;
+          return { x: cx, y: cy };
+        }
+        // Consume this segment, arrive at waypoint, continue
+        cx = wp.x;
+        cy = wp.y;
+        remaining -= segDist;
+      }
+      // Ran out of waypoints -- park at final position
+      return { x: cx, y: cy };
+    } else {
+      // burstTarget: single segment from current pos to burst destination
+      var bdx = target.burstTarget.x - cx;
+      var bdy = target.burstTarget.y - cy;
+      var bDist = Math.sqrt(bdx * bdx + bdy * bdy);
+      if (bDist < 0.1) return { x: cx, y: cy };
+      var travel = Math.min(remaining, bDist);
+      cx += (bdx / bDist) * travel;
+      cy += (bdy / bDist) * travel;
+      return { x: cx, y: cy };
+    }
+  }
+
+  // Iterative convergence: 4 iterations
+  var leadX = target.x;
+  var leadY = target.y;
+  for (var iter = 0; iter < 4; iter++) {
+    var dx = leadX - carrierX;
+    var dy = leadY - carrierY;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    // Same speed curve as updatePassBall uses for adjustedSpeed
+    var speedMult = Math.max(1.0, 2.5 - (1.5 * (dist / 30)));
+    var estSpeed = PASS_SPEED * speedMult;
+    var estTicks = estSpeed > 0 ? dist / estSpeed : 0;
+    // Trace receiver along their actual path for estimated ticks
+    var traced = traceMovement(estTicks);
+    leadX = traced.x;
+    leadY = traced.y;
+  }
+
+  // Clamp to field
+  leadX = Math.max(1, Math.min(99, leadX));
+  leadY = Math.max(1, Math.min(99, leadY));
+  return { x: leadX, y: leadY };
+}
+
 // ==================== ORIGINAL INPUT HANDLING ====================
 
 function tapPlayer(state, playerId) {
@@ -2015,40 +2062,10 @@ function tapPlayer(state, playerId) {
 
   s.ball = { ...s.ball, carrier: null };
   s.passIdCounter = (s.passIdCounter || 0) + 1;
-  // Compute intercept point -- where will the target be when the ball arrives?
-  var passDist = Math.sqrt((c.x - target.x) * (c.x - target.x) + (c.y - target.y) * (c.y - target.y));
-  // Smooth speed curve: 2.5x at 0 units, tapering linearly to 1.0x at 30+ units. No cliffs.
-  var speedMult = Math.max(1.0, 2.5 - (1.5 * (passDist / 30)));
-  var estSpeed = PASS_SPEED * speedMult;
-  var estTicks = estSpeed > 0 ? passDist / estSpeed : 0;
-
-  // Project target position forward based on her current movement
-  // Cap projection to remaining distance to prevent overshooting route endpoints
-  var leadX = target.x;
-  var leadY = target.y;
-  if (target.route && target.route.length > 0) {
-    var rTarget = target.route[0];
-    var rdx = rTarget.x - target.x;
-    var rdy = rTarget.y - target.y;
-    var rdist = Math.sqrt(rdx * rdx + rdy * rdy);
-    if (rdist > 0.1) {
-      var projDist = Math.min(rdist, BURST_SPEED * estTicks);
-      leadX = target.x + (rdx / rdist) * projDist;
-      leadY = target.y + (rdy / rdist) * projDist;
-    }
-  } else if (target.burstTarget) {
-    var bdx = target.burstTarget.x - target.x;
-    var bdy = target.burstTarget.y - target.y;
-    var bdist = Math.sqrt(bdx * bdx + bdy * bdy);
-    if (bdist > 0.1) {
-      var bProjDist = Math.min(bdist, BURST_SPEED * estTicks);
-      leadX = target.x + (bdx / bdist) * bProjDist;
-      leadY = target.y + (bdy / bdist) * bProjDist;
-    }
-  }
-  // Clamp to field
-  leadX = Math.max(1, Math.min(99, leadX));
-  leadY = Math.max(1, Math.min(99, leadY));
+  // Compute intercept point using iterative convergence
+  var lead = calculateLeadPosition(c.x, c.y, target);
+  var leadX = lead.x;
+  var leadY = lead.y;
 
   s.passBall = {
     fromX: c.x, fromY: c.y,
@@ -2566,7 +2583,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.7.0'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.7.1'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2912,7 +2929,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.7.0'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.7.1'),
       // HUD overlay - score/half/clock
       !gameState.drillMode ? React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
