@@ -146,6 +146,11 @@ const SHOT_ANIM_TICKS = 20;
 const HALF_REAL_S = 180; // 3 real minutes per half
 const GAME_TIME_SCALE = 15; // 1 real second = 15 game seconds
 const OOB_PAUSE_TICKS = 15; // 0.5s
+const SPRINT_BOOST_TICKS = 45; // 1.5 seconds of boosted speed
+const SPRINT_SPEED_MULT = 2.5; // multiplier on BURST_SPEED during sprint
+const SPRINT_CHARGES_PER_HALF = 5;
+const SWIPE_MAX_DURATION_MS = 400; // must be faster than this to count as swipe
+const SWIPE_MIN_DISTANCE = 12; // minimum game-units the finger must travel
 
 // ==================== SEEDED PRNG (mulberry32) ====================
 function createPRNG(seed) {
@@ -285,6 +290,13 @@ function getTackleChance(d) {
   if (d <= 1) return 0.50;
   if (d <= 2) return 0.25;
   return 0.10;
+}
+
+function getDrillAggressionMult(state) {
+  if (!state.drillMode) return 1.0;
+  var rampTicks = 60 * 1000 / TICK_MS;
+  var progress = Math.min(1.0, state.clock.elapsed / rampTicks);
+  return 0.3 + 0.7 * progress;
 }
 
 function getAttackGoalX(team, half) {
@@ -447,7 +459,7 @@ function createInitialState() {
       x: f.x, y: f.y, homeX: f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: i === 9, // first ST starts with ball
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
     });
   });
   AWAY_FORMATION.forEach((f, i) => {
@@ -456,7 +468,7 @@ function createInitialState() {
       x: f.x, y: f.y, homeX: f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
     });
   });
 
@@ -495,6 +507,8 @@ function createInitialState() {
     drillComplete: false,
     drillFailed: false,
     drillMessage: '',
+    sprintCharges: { home: 5, away: 5 },
+    showTutorial: true,
   };
 }
 
@@ -519,7 +533,7 @@ function startDrill(unusedState, drillId) {
       x: dp.x, y: dp.y, homeX: dp.x, homeY: dp.y,
       vx: 0, vy: 0, hasBall: i === drill.ballCarrierIndex,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
     });
   }
 
@@ -544,6 +558,8 @@ function startDrill(unusedState, drillId) {
     drillComplete: false,
     drillFailed: false,
     drillMessage: drill.hint,
+    showTutorial: false,
+    sprintCharges: { home: 5, away: 5 },
   });
 }
 
@@ -571,6 +587,8 @@ function updateGame(state, action) {
     case 'START_DRILL': return startDrill(state, action.drillId);
     case 'RESET_DRILL': return startDrill(state, state.drillId);
     case 'EXIT_DRILL': return createInitialState();
+    case 'SPRINT_BOOST': return sprintBoost(state, action.team);
+    case 'DISMISS_TUTORIAL': return { ...state, showTutorial: false };
     default: return state;
   }
 }
@@ -913,7 +931,7 @@ function updatePassBall(s) {
     if (pb.checkedBy.has(p.id)) continue;
     pb.checkedBy.add(p.id);
 
-    if (gameRNG() < getInterceptionChance(pDist)) {
+    if (gameRNG() < getInterceptionChance(pDist) * getDrillAggressionMult(s)) {
       p.hasBall = true;
       p.settlingUntil = s.tick + SETTLING_TICKS;
       s.ball.carrier = p.id;
@@ -983,8 +1001,9 @@ function driftPlayers(s) {
       const toBallX = ballX - p.x;
       const toBallY = ballY - p.y;
       const toBallD = Math.sqrt(toBallX * toBallX + toBallY * toBallY) || 1;
-      driftX = (toBallX / toBallD) * DRIFT_SPEED * 0.3;
-      driftY = (toBallY / toBallD) * DRIFT_SPEED * 0.15;
+      var defDriftMult = s.drillMode ? getDrillAggressionMult(s) : 1.0;
+      driftX = (toBallX / toBallD) * DRIFT_SPEED * 0.3 * defDriftMult;
+      driftY = (toBallY / toBallD) * DRIFT_SPEED * 0.15 * defDriftMult;
     } else {
       driftX = DRIFT_SPEED * 0.4 * attackDir;
       driftY = (gameRNG() - 0.5) * DRIFT_SPEED * 0.2;
@@ -1025,15 +1044,17 @@ function routeMovement(s) {
         var ndy = next.y - p.y;
         var ndist = Math.sqrt(ndx * ndx + ndy * ndy);
         if (ndist > 0.1) {
-          p.x += (ndx / ndist) * BURST_SPEED;
-          p.y += (ndy / ndist) * BURST_SPEED;
+          var moveSpeed2 = (p.sprintBoostUntil && p.sprintBoostUntil > s.tick) ? BURST_SPEED * SPRINT_SPEED_MULT : BURST_SPEED;
+          p.x += (ndx / ndist) * moveSpeed2;
+          p.y += (ndy / ndist) * moveSpeed2;
         }
       }
       continue;
     }
 
-    p.x += (dx / dist) * BURST_SPEED;
-    p.y += (dy / dist) * BURST_SPEED;
+    var moveSpeed = (p.sprintBoostUntil && p.sprintBoostUntil > s.tick) ? BURST_SPEED * SPRINT_SPEED_MULT : BURST_SPEED;
+    p.x += (dx / dist) * moveSpeed;
+    p.y += (dy / dist) * moveSpeed;
   }
   return s;
 }
@@ -1052,8 +1073,9 @@ function burstMovement(s) {
       continue;
     }
 
-    p.x += (dx / dist) * BURST_SPEED;
-    p.y += (dy / dist) * BURST_SPEED;
+    var moveSpeed = (p.sprintBoostUntil && p.sprintBoostUntil > s.tick) ? BURST_SPEED * SPRINT_SPEED_MULT : BURST_SPEED;
+    p.x += (dx / dist) * moveSpeed;
+    p.y += (dy / dist) * moveSpeed;
   }
   return s;
 }
@@ -1109,7 +1131,7 @@ function checkTackles(s) {
     if (p.cooldownUntil > s.tick) continue;
     const d = getDist(p.x, p.y, carrier.x, carrier.y);
     if (d > 3) continue;
-    if (gameRNG() < getTackleChance(d)) {
+    if (gameRNG() < getTackleChance(d) * getDrillAggressionMult(s)) {
       // Tackle successful -- ball goes directly to tackler
       carrier.hasBall = false;
       carrier.burstTarget = null;
@@ -1573,7 +1595,7 @@ function resetForKickoff(s) {
       x: fx, y: f.y, homeX: fx, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
     });
   });
   AWAY_FORMATION.forEach((f, i) => {
@@ -1583,7 +1605,7 @@ function resetForKickoff(s) {
       x: fx, y: f.y, homeX: fx, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
     });
   });
 
@@ -1612,7 +1634,7 @@ function startSecondHalf(state) {
       x: 100 - f.x, y: f.y, homeX: 100 - f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
     });
   });
   AWAY_FORMATION.forEach((f, i) => {
@@ -1621,7 +1643,7 @@ function startSecondHalf(state) {
       x: 100 - f.x, y: f.y, homeX: 100 - f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
     });
   });
   const kickoffPlayer = players.find(p => p.id === 'away_9');
@@ -1643,6 +1665,7 @@ function startSecondHalf(state) {
     timeoutActive: false,
     timeoutCountdown: 0,
     timeoutRequestedBy: null,
+    sprintCharges: { home: 5, away: 5 },
   };
 }
 
@@ -1966,6 +1989,22 @@ function throughBall(state, x, y) {
     nearestTeammate.burstTarget = { x: x, y: y };
   }
 
+  return s;
+}
+
+function sprintBoost(state, team) {
+  if (state.phase !== 'play') return state;
+  if (!state.ball.carrier) return state;
+  if (state.sprintCharges[team] <= 0) return state;
+
+  var carrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
+  if (!carrier || carrier.team !== team) return state;
+  if (carrier.sprintBoostUntil > state.tick) return state; // already boosted, don't waste charge
+
+  var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
+  var c = s.players.find(function(p) { return p.id === carrier.id; });
+  c.sprintBoostUntil = s.tick + SPRINT_BOOST_TICKS;
+  s.sprintCharges = { ...s.sprintCharges, [team]: s.sprintCharges[team] - 1 };
   return s;
 }
 
@@ -2424,6 +2463,31 @@ function App() {
 
         dispatchAndSend({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
       }
+
+      // SWIPE SPRINT: empty field fast swipe = speed boost for carrier
+      if (dr.playerId === null && dr.mode === 'player') {
+        var swipeDuration = Date.now() - dr.startTime;
+        var rectSwipe = fieldRef.current.getBoundingClientRect();
+        var swipePx = e.clientX - rectSwipe.left;
+        var swipePy = e.clientY - rectSwipe.top;
+        var swipeGx = Math.max(1, Math.min(99, swipePx / pixelsPerUnitRef.current));
+        var swipeGy = Math.max(1, Math.min(99, swipePy / (fieldDims.height / 100)));
+        var swipeDist = Math.sqrt(
+          (swipeGx - dr.startGx) * (swipeGx - dr.startGx) +
+          (swipeGy - dr.startGy) * (swipeGy - dr.startGy)
+        );
+        if (swipeDuration < SWIPE_MAX_DURATION_MS && swipeDist >= SWIPE_MIN_DISTANCE) {
+          var swipeState = stateRef.current;
+          if (swipeState.ball.carrier && swipeState.sprintCharges[localTeam] > 0) {
+            var swipeCarrier = swipeState.players.find(function(p) { return p.id === swipeState.ball.carrier; });
+            if (swipeCarrier && swipeCarrier.team === localTeam) {
+              AudioSys.kick();
+              dispatchAndSend({ type: 'SPRINT_BOOST', team: localTeam });
+            }
+          }
+        }
+      }
+
       dragRef.current = fullReset;
       return;
     }
@@ -2447,36 +2511,7 @@ function App() {
         return;
       }
 
-      // 1. Check if tapping the goal area to shoot
-      var hGoalX = getAttackGoalX(localTeam, state.clock.half);
-      var distToGoalLine = Math.abs(hGoalX - carrier.x);
-      var inRange = distToGoalLine <= SHOOT_RANGE_X;
-
-      if (inRange) {
-        var isShot = false;
-
-        if (distToGoalLine <= 20) {
-          // Close range: any tap toward the goal is a shot
-          if (hGoalX === 100) {
-            isShot = gx > carrier.x; // tapping forward (toward right goal)
-          } else {
-            isShot = gx < carrier.x; // tapping forward (toward left goal)
-          }
-        } else {
-          // Normal range: widened goal tap zone (Y 25-75 instead of 35-65)
-          var isGoalTap = (hGoalX === 100 ? gx >= 85 : gx <= 15) && gy >= 25 && gy <= 75;
-          isShot = isGoalTap;
-        }
-
-        if (isShot) {
-          AudioSys.kick();
-          dispatchAndSend({ type: 'SHOOT', aimX: gx, aimY: gy });
-          dragRef.current = fullReset;
-          return;
-        }
-      }
-
-      // 2. Check if tapping a teammate to pass
+      // 1. Check if tapping a teammate to pass
       var tapRadius = 48;
       var tappedTeammate = null;
       var minDist = Infinity;
@@ -2500,7 +2535,7 @@ function App() {
         return;
       }
 
-      // 2b. Check if tapping near a friendly player's route line
+      // 1b. Check if tapping near a friendly player's route line
       var routeHitDist = 15; // pixels tolerance
       var routeHitPlayer = null;
       var routeHitMinDist = Infinity;
@@ -2538,6 +2573,35 @@ function App() {
         dispatchAndSend({ type: 'TAP_PLAYER', playerId: routeHitPlayer.id });
         dragRef.current = fullReset;
         return;
+      }
+
+      // 2. Check if tapping the goal area to shoot
+      var hGoalX = getAttackGoalX(localTeam, state.clock.half);
+      var distToGoalLine = Math.abs(hGoalX - carrier.x);
+      var inRange = distToGoalLine <= SHOOT_RANGE_X;
+
+      if (inRange) {
+        var isShot = false;
+
+        if (distToGoalLine <= 20) {
+          // Close range: any tap toward the goal is a shot
+          if (hGoalX === 100) {
+            isShot = gx > carrier.x; // tapping forward (toward right goal)
+          } else {
+            isShot = gx < carrier.x; // tapping forward (toward left goal)
+          }
+        } else {
+          // Normal range: widened goal tap zone (Y 25-75 instead of 35-65)
+          var isGoalTap = (hGoalX === 100 ? gx >= 85 : gx <= 15) && gy >= 25 && gy <= 75;
+          isShot = isGoalTap;
+        }
+
+        if (isShot) {
+          AudioSys.kick();
+          dispatchAndSend({ type: 'SHOOT', aimX: gx, aimY: gy });
+          dragRef.current = fullReset;
+          return;
+        }
       }
 
       // 3. Tap on empty field = through ball
@@ -2583,7 +2647,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.7.1'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.8.0'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2902,6 +2966,21 @@ function App() {
           });
         })(),
 
+        // Sprint boost rings (persist on any boosted player, even after passing)
+        ...gameState.players.filter(function(p) {
+          return p.sprintBoostUntil && p.sprintBoostUntil > gameState.tick;
+        }).map(function(p) {
+          return React.createElement('circle', {
+            key: 'sprint-ring-' + p.id,
+            cx: p.x * ppu, cy: p.y * ypu,
+            r: Math.max(22, ppu * 2.8),
+            fill: 'none', stroke: '#ff6b00',
+            strokeWidth: 2,
+            opacity: 0.6 + 0.4 * Math.sin(gameState.tick * 0.4),
+            strokeDasharray: '4 2',
+          });
+        }),
+
         // Selected defender ring
         gameState.selectedDefender ? (function() {
           var sd = gameState.players.find(function(p) { return p.id === gameState.selectedDefender; });
@@ -2929,7 +3008,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.7.1'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.8.0'),
       // HUD overlay - score/half/clock
       !gameState.drillMode ? React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
@@ -3006,6 +3085,63 @@ function App() {
           fontFamily: 'Arial, sans-serif',
         }
       }, 'KICK OFF')) : null,
+
+      // Tutorial overlay (first game start only)
+      gameState.showTutorial && !sandboxMode && !gameState.drillMode && gameState.phase === 'play' ? React.createElement('div', {
+        key: 'tutorial-overlay',
+        style: {
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.7)',
+          zIndex: 200,
+          cursor: 'pointer',
+        },
+        onPointerDown: function(e) {
+          e.stopPropagation();
+          dispatch({ type: 'DISMISS_TUTORIAL' });
+          dispatch({ type: 'TACTICAL_PAUSE' });
+        },
+      },
+        React.createElement('div', {
+          style: { maxWidth: '85%', textAlign: 'center', color: 'white' }
+        },
+          React.createElement('div', {
+            style: { fontSize: Math.max(28, fw * 0.05) + 'px', fontWeight: 'bold', marginBottom: '24px', color: '#ffd700' }
+          }, 'HOW TO PLAY'),
+          React.createElement('div', {
+            style: { fontSize: Math.max(16, fw * 0.03) + 'px', lineHeight: '2.2', textAlign: 'left', display: 'inline-block' }
+          },
+            React.createElement('div', { style: { marginBottom: '8px' } },
+              React.createElement('span', { style: { color: '#60a5fa', fontWeight: 'bold' } }, 'DRAW'),
+              ' routes for your players to follow'
+            ),
+            React.createElement('div', { style: { marginBottom: '8px' } },
+              React.createElement('span', { style: { color: '#60a5fa', fontWeight: 'bold' } }, 'TAP'),
+              ' a teammate to pass'
+            ),
+            React.createElement('div', { style: { marginBottom: '8px' } },
+              React.createElement('span', { style: { color: '#60a5fa', fontWeight: 'bold' } }, 'TAP'),
+              ' the goal area to shoot'
+            ),
+            React.createElement('div', { style: { marginBottom: '8px' } },
+              React.createElement('span', { style: { color: '#60a5fa', fontWeight: 'bold' } }, 'TAP'),
+              ' empty space for a through ball'
+            ),
+            React.createElement('div', { style: { marginBottom: '8px' } },
+              React.createElement('span', { style: { color: '#ff6b00', fontWeight: 'bold' } }, 'SWIPE'),
+              ' the field for a speed burst'
+            ),
+            React.createElement('div', null,
+              React.createElement('span', { style: { color: '#059669', fontWeight: 'bold' } }, 'PAUSE'),
+              ' button for tactical timeouts'
+            )
+          ),
+          React.createElement('div', {
+            style: { marginTop: '28px', fontSize: Math.max(14, fw * 0.025) + 'px', color: '#999' }
+          }, 'Tap anywhere to start')
+        )
+      ) : null,
 
       // Halftime overlay
       gameState.phase === 'halftime' ? React.createElement('div', {
@@ -3218,46 +3354,111 @@ function App() {
       ) : null,
 
       // Tactical pause button (solo and multiplayer -- not sandbox, which has its own toolbar)
-      !sandboxMode && gameState.phase === 'play' ? React.createElement('button', {
-        key: 'timeout-btn',
-        onPointerDown: function(e) {
-          e.stopPropagation();
-          if (gameState.timeoutActive) {
-            // During active countdown, button does nothing
-            return;
+      !sandboxMode && gameState.phase === 'play' ? (function() {
+        var canCallTimeout = true;
+        var btnLabel = '';
+        var btnBg = '';
+
+        if (gameState.tacticalPaused || gameState.timeoutActive) {
+          canCallTimeout = true;
+        } else if (gameState.timeoutQueue && gameState.timeoutQueue.team === localTeam) {
+          canCallTimeout = true;
+        } else if (netState.isMultiplayer) {
+          if (gameState.timeouts[localTeam] <= 0) {
+            canCallTimeout = false;
+          } else if (gameState.ball.carrier) {
+            var toCarrier = gameState.players.find(function(p) { return p.id === gameState.ball.carrier; });
+            if (toCarrier && toCarrier.team !== localTeam) {
+              canCallTimeout = false;
+            }
           }
-          if (gameState.timeoutQueue && gameState.timeoutQueue.team === localTeam) {
-            // Cancel queued timeout
-            dispatchAndSend({ type: 'CANCEL_TIMEOUT', team: localTeam });
-            return;
+        }
+
+        if (gameState.timeoutQueue && gameState.timeoutQueue.team === localTeam) {
+          btnLabel = 'PENDING...';
+          btnBg = '#b45309';
+        } else if (gameState.timeoutActive) {
+          btnLabel = 'TIMEOUT ' + Math.ceil(gameState.timeoutCountdown / 30) + 's';
+          btnBg = '#7c3aed';
+        } else if (gameState.tacticalPaused) {
+          btnLabel = '\u25B6 RESUME';
+          btnBg = '#059669';
+        } else {
+          btnLabel = '\u23F8 PAUSE';
+          btnBg = canCallTimeout ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.25)';
+        }
+
+        return React.createElement('button', {
+          key: 'timeout-btn',
+          onPointerDown: function(e) {
+            e.stopPropagation();
+            if (!canCallTimeout) return;
+            if (gameState.timeoutActive) return;
+            if (gameState.timeoutQueue && gameState.timeoutQueue.team === localTeam) {
+              dispatchAndSend({ type: 'CANCEL_TIMEOUT', team: localTeam });
+              return;
+            }
+            if (gameState.tacticalPaused) {
+              dispatchAndSend({ type: 'TACTICAL_RESUME' });
+              return;
+            }
+            dispatchAndSend({ type: 'REQUEST_TIMEOUT', team: localTeam });
+          },
+          style: {
+            position: 'absolute',
+            bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
+            right: 'calc(12px + env(safe-area-inset-right, 0px))',
+            zIndex: 20,
+            pointerEvents: 'auto',
+            background: btnBg,
+            color: canCallTimeout ? 'white' : 'rgba(255,255,255,0.4)',
+            border: '1px solid rgba(255,255,255,' + (canCallTimeout ? '0.3' : '0.1') + ')',
+            borderRadius: '6px',
+            padding: '8px 14px',
+            fontWeight: 'bold',
+            fontSize: '0.95em',
+            cursor: canCallTimeout ? 'pointer' : 'default',
+            transition: 'background 0.2s, color 0.2s',
           }
-          if (gameState.tacticalPaused) {
-            // Resume from pause (solo indefinite or post-countdown)
-            dispatchAndSend({ type: 'TACTICAL_RESUME' });
-            return;
-          }
-          // Request timeout (solo = instant free pause, multiplayer = countdown)
-          dispatchAndSend({ type: 'REQUEST_TIMEOUT', team: localTeam });
-        },
+        }, btnLabel);
+      })() : null,
+
+      // Sprint charges HUD
+      !sandboxMode && !gameState.drillMode && (gameState.phase === 'play' || gameState.phase === 'shot') ? React.createElement('div', {
+        key: 'sprint-hud',
         style: {
           position: 'absolute',
           bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
-          right: 'calc(12px + env(safe-area-inset-right, 0px))',
+          left: 'calc(12px + env(safe-area-inset-left, 0px))',
           zIndex: 20,
-          pointerEvents: 'auto',
-          background: gameState.timeoutQueue ? '#b45309' : gameState.timeoutActive ? '#7c3aed' : gameState.tacticalPaused ? '#059669' : 'rgba(0,0,0,0.55)',
-          color: 'white',
-          border: '1px solid rgba(255,255,255,0.3)',
-          borderRadius: '6px',
-          padding: '8px 14px',
-          fontWeight: 'bold',
-          fontSize: '0.95em',
-          cursor: 'pointer',
+          pointerEvents: 'none',
+          display: 'flex',
+          gap: '4px',
+          alignItems: 'center',
         }
-      }, gameState.timeoutQueue ? 'PENDING...'
-        : gameState.timeoutActive ? ('TIMEOUT ' + Math.ceil(gameState.timeoutCountdown / 30) + 's')
-        : gameState.tacticalPaused ? '\u25B6 RESUME'
-        : '\u23F8 PAUSE') : null,
+      },
+        ...(function() {
+          var pips = [];
+          var charges = localTeam === 'home' ? gameState.sprintCharges.home : gameState.sprintCharges.away;
+          for (var si = 0; si < SPRINT_CHARGES_PER_HALF; si++) {
+            pips.push(React.createElement('div', {
+              key: 'pip-' + si,
+              style: {
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                background: si < charges ? '#ffd700' : 'rgba(255,255,255,0.2)',
+                border: '1px solid rgba(255,255,255,0.4)',
+                transition: 'background 0.3s',
+              }
+            }));
+          }
+          return pips;
+        })(),
+        React.createElement('span', {
+          style: { color: 'rgba(255,255,255,0.5)', fontSize: '0.7em', marginLeft: '4px' }
+        }, 'SPRINT')
+      ) : null,
 
       // Tactical pause overlay (not shown in sandbox -- sandbox has its own toolbar)
       gameState.tacticalPaused && !sandboxMode ? React.createElement('div', {

@@ -1,5 +1,39 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.8.0 -- 2026-03-22
+- Fixed shot priority: teammate tap now checked before shot even near goal
+- Sprint swipe: fast swipe on empty field gives ball carrier speed burst (5 charges per half, 1.5s at 2.5x speed)
+- Tutorial overlay: shows controls on first game start, dismisses on tap, auto-pauses for route drawing
+- Multiplayer timeout button: visual feedback when unavailable (dims when opponent has possession)
+- Drill defender aggression ramp: defenders start at 30% aggression, reach 100% at 60 seconds
+
+## Alpha 2.7.0 (2026-03-13)
+- Shot priority fix: two-tier detection -- close range (≤20 units) any forward tap is a shot, normal range widens Y zone to 25-75
+- Leading passes: ball flies straight to computed intercept point instead of homing onto moving target every tick
+- Intercept uses route/burst projection capped to remaining distance; receiver must be within 4 units of intercept point or ball goes loose
+- CPU passes also use intercept calculation (same formula)
+- Pass speed boost: smooth curve from 2.5x point-blank to 1.0x at 30+ units (was 1.5x cap at ≤10 units)
+- Speed formula consistent across tapPlayer intercept, cpuPass intercept, and updatePassBall runtime
+- Tactical Mode button added to title screen menu (between PLAY SOLO and HOST GAME)
+- JOIN GAME button color changed to darker purple (#6d28d9) to distinguish from Tactical Mode
+
+## Alpha 2.6.0 (2026-03-13)
+- Drill Mode: new top-level experience with 6 starter drills
+- Drills: Rondo 4v2 (pass count), 3v2 Attack (goal), Give-and-Go (goal), Build Out From Back (zone), Switch the Play (zone), Overlap Run (goal)
+- Title screen DRILLS button opens drill selection with names, descriptions, and teaching points
+- Each drill starts paused with hint text; uses full field with visible zone outlines
+- Success conditions: pass count, goal scoring, or ball delivery to target zone
+- Failure conditions: interception, tackle, ball out of bounds
+- Auto-pause on drill complete/fail with result overlay (RESET / BACK TO DRILLS)
+- Drill HUD shows drill name and pass counter; score HUD hidden in drill mode
+- CPU strategy disabled in drill mode (defenders still drift/tackle naturally)
+- Drill OOB clamps ball to field instead of throw-ins/corners
+- Halftime/fulltime disabled in drill mode; goal celebration intercepted for result display
+- Drill state built on createInitialState() base -- no missing engine fields
+
+## Alpha 2.5.0 (2026-03-13)
+- Tactical Mode: timeout system with planning window
+
 ## Alpha 2.4.7 (2026-03-11)
 - OOB corner teleport fix: 7 targeted edits to prevent passes aimed at corners from teleporting the ball across the field
 - Pass-in-flight OOB: added toId guard to sideline and endline boundary checks -- targeted passes (toId set) no longer trigger in-flight OOB when trajectory grazes a boundary
