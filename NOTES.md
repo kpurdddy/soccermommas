@@ -1,5 +1,17 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.8.1
+- Replaced pip-based sprint system with analog sprint meter
+  - 2 quick swipes on empty field to activate (bar appears at ~70% full)
+  - Additional swipes fill the bar with diminishing returns
+  - Bar drains in real time when not swiping
+  - Empty bar = fatigued (below-normal speed until recovery completes)
+  - Recovery time scales with how hard you sprinted (short burst = quick, full gas-out = long)
+  - Defense: tap defender to select, then swipe to sprint them
+- Fixed behind-keeper scoring: shots from behind the keeper (closer to goal line) are near-guaranteed goals
+- Fixed close-range save animation: ball zips faster at short range, keeper lunges visibly
+- Updated tutorial text with fatigue warning
+
 ## Alpha 2.8.0 -- 2026-03-22
 - Fixed shot priority: teammate tap now checked before shot even near goal
 - Sprint swipe: fast swipe on empty field gives ball carrier speed burst (5 charges per half, 1.5s at 2.5x speed)

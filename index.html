@@ -146,11 +146,19 @@ const SHOT_ANIM_TICKS = 20;
 const HALF_REAL_S = 180; // 3 real minutes per half
 const GAME_TIME_SCALE = 15; // 1 real second = 15 game seconds
 const OOB_PAUSE_TICKS = 15; // 0.5s
-const SPRINT_BOOST_TICKS = 45; // 1.5 seconds of boosted speed
-const SPRINT_SPEED_MULT = 2.5; // multiplier on BURST_SPEED during sprint
-const SPRINT_CHARGES_PER_HALF = 5;
-const SWIPE_MAX_DURATION_MS = 400; // must be faster than this to count as swipe
-const SWIPE_MIN_DISTANCE = 12; // minimum game-units the finger must travel
+// -- Analog Sprint System --
+const SPRINT_INITIAL_FILL = 0.70;       // meter level on activation (after 2 swipes)
+const SPRINT_FILL_PER_SWIPE = 0.15;     // fuel added per swipe (before decay)
+const SPRINT_FILL_DECAY = 0.65;         // each swipe past the 3rd fills less (multiplied per extra swipe)
+const SPRINT_DRAIN_RATE = 0.008;        // meter drain per tick while sprinting
+const SPRINT_DRAIN_DELAY_TICKS = 15;    // ticks after last swipe before drain starts (~500ms)
+const FATIGUE_SPEED_MULT = 0.6;         // speed multiplier when fatigued (below normal)
+const FATIGUE_RECOVERY_COEFF = 0.85;    // recovery formula coefficient (tuning constant)
+const FATIGUE_RECOVERY_EXP = 2.7;       // recovery formula exponent (tuning constant)
+const FATIGUE_MIN_RECOVERY = 30;        // minimum recovery ticks (~1 real second)
+const SPRINT_SWIPE_MAX_MS = 500;        // max duration for a single swipe gesture
+const SPRINT_SWIPE_MIN_DIST = 10;       // min game-units the finger must travel
+const SPRINT_CONSECUTIVE_WINDOW_MS = 1000; // max gap between consecutive swipes
 
 // ==================== SEEDED PRNG (mulberry32) ====================
 function createPRNG(seed) {
@@ -297,6 +305,12 @@ function getDrillAggressionMult(state) {
   var rampTicks = 60 * 1000 / TICK_MS;
   var progress = Math.min(1.0, state.clock.elapsed / rampTicks);
   return 0.3 + 0.7 * progress;
+}
+
+function getPlayerSpeed(p) {
+  if (p.fatigued) return BURST_SPEED * FATIGUE_SPEED_MULT;
+  if (p.sprintActive && p.sprintMeter > 0) return BURST_SPEED * (1.0 + p.sprintMeter * 1.5);
+  return BURST_SPEED;
 }
 
 function getAttackGoalX(team, half) {
@@ -459,7 +473,10 @@ function createInitialState() {
       x: f.x, y: f.y, homeX: f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: i === 9, // first ST starts with ball
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+      sprintMeter: 0, sprintActive: false, sprintStartTick: 0,
+      sprintSwipes: 0, lastSwipeTick: 0,
+      fatigued: false, fatigueRecoveryTick: 0, fatigueStartTick: 0,
     });
   });
   AWAY_FORMATION.forEach((f, i) => {
@@ -468,7 +485,10 @@ function createInitialState() {
       x: f.x, y: f.y, homeX: f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+      sprintMeter: 0, sprintActive: false, sprintStartTick: 0,
+      sprintSwipes: 0, lastSwipeTick: 0,
+      fatigued: false, fatigueRecoveryTick: 0, fatigueStartTick: 0,
     });
   });
 
@@ -507,7 +527,7 @@ function createInitialState() {
     drillComplete: false,
     drillFailed: false,
     drillMessage: '',
-    sprintCharges: { home: 5, away: 5 },
+    sprintTarget: null,
     showTutorial: true,
   };
 }
@@ -533,7 +553,10 @@ function startDrill(unusedState, drillId) {
       x: dp.x, y: dp.y, homeX: dp.x, homeY: dp.y,
       vx: 0, vy: 0, hasBall: i === drill.ballCarrierIndex,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+      sprintMeter: 0, sprintActive: false, sprintStartTick: 0,
+      sprintSwipes: 0, lastSwipeTick: 0,
+      fatigued: false, fatigueRecoveryTick: 0, fatigueStartTick: 0,
     });
   }
 
@@ -559,7 +582,7 @@ function startDrill(unusedState, drillId) {
     drillFailed: false,
     drillMessage: drill.hint,
     showTutorial: false,
-    sprintCharges: { home: 5, away: 5 },
+    sprintTarget: null,
   });
 }
 
@@ -587,7 +610,8 @@ function updateGame(state, action) {
     case 'START_DRILL': return startDrill(state, action.drillId);
     case 'RESET_DRILL': return startDrill(state, state.drillId);
     case 'EXIT_DRILL': return createInitialState();
-    case 'SPRINT_BOOST': return sprintBoost(state, action.team);
+    case 'SPRINT_START': return sprintStart(state, action.team, action.playerId);
+    case 'SPRINT_SWIPE': return sprintSwipe(state, action.team);
     case 'DISMISS_TUTORIAL': return { ...state, showTutorial: false };
     default: return state;
   }
@@ -686,6 +710,34 @@ function gameTick(state) {
   }
   if (!s.drillMode && s.clock.half === 2 && gameSeconds >= 5400) {
     return { ...s, phase: 'fulltime', clock: { ...s.clock, running: false } };
+  }
+
+  // -- Sprint drain and fatigue recovery --
+  for (var si = 0; si < s.players.length; si++) {
+    var sp = s.players[si];
+    if (sp.sprintActive && sp.sprintMeter > 0) {
+      // Only drain after a short delay since last swipe
+      if (s.tick - sp.lastSwipeTick > SPRINT_DRAIN_DELAY_TICKS) {
+        sp.sprintMeter = Math.max(0, sp.sprintMeter - SPRINT_DRAIN_RATE);
+      }
+      if (sp.sprintMeter <= 0) {
+        sp.sprintActive = false;
+        sp.sprintMeter = 0;
+        sp.fatigued = true;
+        sp.fatigueStartTick = s.tick;
+        var spRecov = Math.max(FATIGUE_MIN_RECOVERY, Math.round(FATIGUE_RECOVERY_COEFF * Math.pow(Math.min(sp.sprintSwipes, 12), FATIGUE_RECOVERY_EXP)));
+        sp.fatigueRecoveryTick = s.tick + spRecov;
+        if (s.sprintTarget === sp.id) s.sprintTarget = null;
+      }
+    }
+    if (sp.fatigued && s.tick >= sp.fatigueRecoveryTick) {
+      sp.fatigued = false;
+      sp.fatigueRecoveryTick = 0;
+      sp.fatigueStartTick = 0;
+      sp.sprintStartTick = 0;
+      sp.sprintSwipes = 0;
+      sp.lastSwipeTick = 0;
+    }
   }
 
   s = updatePassBall(s);
@@ -1044,7 +1096,7 @@ function routeMovement(s) {
         var ndy = next.y - p.y;
         var ndist = Math.sqrt(ndx * ndx + ndy * ndy);
         if (ndist > 0.1) {
-          var moveSpeed2 = (p.sprintBoostUntil && p.sprintBoostUntil > s.tick) ? BURST_SPEED * SPRINT_SPEED_MULT : BURST_SPEED;
+          var moveSpeed2 = getPlayerSpeed(p);
           p.x += (ndx / ndist) * moveSpeed2;
           p.y += (ndy / ndist) * moveSpeed2;
         }
@@ -1052,7 +1104,7 @@ function routeMovement(s) {
       continue;
     }
 
-    var moveSpeed = (p.sprintBoostUntil && p.sprintBoostUntil > s.tick) ? BURST_SPEED * SPRINT_SPEED_MULT : BURST_SPEED;
+    var moveSpeed = getPlayerSpeed(p);
     p.x += (dx / dist) * moveSpeed;
     p.y += (dy / dist) * moveSpeed;
   }
@@ -1073,7 +1125,7 @@ function burstMovement(s) {
       continue;
     }
 
-    var moveSpeed = (p.sprintBoostUntil && p.sprintBoostUntil > s.tick) ? BURST_SPEED * SPRINT_SPEED_MULT : BURST_SPEED;
+    var moveSpeed = getPlayerSpeed(p);
     p.x += (dx / dist) * moveSpeed;
     p.y += (dy / dist) * moveSpeed;
   }
@@ -1465,13 +1517,20 @@ function executeShot(state, carrierId, aimX, aimY) {
   var keeperFactor = 1.0;
 
   if (keeper) {
-    var keeperDist = Math.abs(keeper.y - clampedAimY);
-    if (keeperDist > 15) {
-      keeperFactor = 0.25;
-    } else if (keeperDist > 8) {
-      keeperFactor = 0.55;
+    // Behind-keeper check: if shooter is closer to goal line than keeper, near-open net
+    var shooterDistToGoal = Math.abs(goalX - carrier.x);
+    var keeperDistToGoal = Math.abs(goalX - keeper.x);
+    if (shooterDistToGoal < keeperDistToGoal) {
+      keeperFactor = 0.05;
     } else {
-      keeperFactor = Math.max(0.75, 1.0 - keeperDist * 0.04);
+      var keeperDist = Math.abs(keeper.y - clampedAimY);
+      if (keeperDist > 15) {
+        keeperFactor = 0.25;
+      } else if (keeperDist > 8) {
+        keeperFactor = 0.55;
+      } else {
+        keeperFactor = Math.max(0.75, 1.0 - keeperDist * 0.04);
+      }
     }
   }
 
@@ -1508,11 +1567,13 @@ function executeShot(state, carrierId, aimX, aimY) {
   carrier.route = [];
   s.ball.carrier = null;
   s.passBall = null;
+  var shotTicks = Math.max(8, Math.round(distToGoal * 0.8));
   s.shot = {
     result: result, shootingTeam: shootingTeam,
     fromX: carrier.x, fromY: carrier.y,
     targetX: targetX, targetY: targetY,
-    ticksTotal: SHOT_ANIM_TICKS, ticksElapsed: 0,
+    ticksTotal: shotTicks, ticksElapsed: 0,
+    distToGoal: distToGoal,
   };
   s.phase = 'shot';
   return s;
@@ -1533,7 +1594,12 @@ function updateShotAnimation(state) {
   const keeperId = s.shot.shootingTeam === 'home' ? 'away_0' : 'home_0';
   const keeper = s.players.find(p => p.id === keeperId);
   if (keeper) {
-    keeper.y += (s.shot.targetY - keeper.y) * 0.15;
+    var trackRate = (s.shot.distToGoal != null && s.shot.distToGoal < 12) ? 0.35 : 0.15;
+    keeper.y += (s.shot.targetY - keeper.y) * trackRate;
+    // Close-range saves: keeper lunges toward ball X position too
+    if (s.shot.result === 'save' && s.shot.distToGoal != null && s.shot.distToGoal < 12) {
+      keeper.x += (s.ball.x - keeper.x) * 0.2;
+    }
   }
 
   if (s.shot.ticksElapsed >= s.shot.ticksTotal) {
@@ -1595,7 +1661,10 @@ function resetForKickoff(s) {
       x: fx, y: f.y, homeX: fx, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+      sprintMeter: 0, sprintActive: false, sprintStartTick: 0,
+      sprintSwipes: 0, lastSwipeTick: 0,
+      fatigued: false, fatigueRecoveryTick: 0, fatigueStartTick: 0,
     });
   });
   AWAY_FORMATION.forEach((f, i) => {
@@ -1605,7 +1674,10 @@ function resetForKickoff(s) {
       x: fx, y: f.y, homeX: fx, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+      sprintMeter: 0, sprintActive: false, sprintStartTick: 0,
+      sprintSwipes: 0, lastSwipeTick: 0,
+      fatigued: false, fatigueRecoveryTick: 0, fatigueStartTick: 0,
     });
   });
 
@@ -1634,7 +1706,10 @@ function startSecondHalf(state) {
       x: 100 - f.x, y: f.y, homeX: 100 - f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+      sprintMeter: 0, sprintActive: false, sprintStartTick: 0,
+      sprintSwipes: 0, lastSwipeTick: 0,
+      fatigued: false, fatigueRecoveryTick: 0, fatigueStartTick: 0,
     });
   });
   AWAY_FORMATION.forEach((f, i) => {
@@ -1643,7 +1718,10 @@ function startSecondHalf(state) {
       x: 100 - f.x, y: f.y, homeX: 100 - f.x, homeY: f.y,
       vx: 0, vy: 0, hasBall: false,
       burstTarget: null, burstCooldownUntil: 0, route: [],
-      settlingUntil: 0, cooldownUntil: 0, sprintBoostUntil: 0,
+      settlingUntil: 0, cooldownUntil: 0,
+      sprintMeter: 0, sprintActive: false, sprintStartTick: 0,
+      sprintSwipes: 0, lastSwipeTick: 0,
+      fatigued: false, fatigueRecoveryTick: 0, fatigueStartTick: 0,
     });
   });
   const kickoffPlayer = players.find(p => p.id === 'away_9');
@@ -1665,7 +1743,7 @@ function startSecondHalf(state) {
     timeoutActive: false,
     timeoutCountdown: 0,
     timeoutRequestedBy: null,
-    sprintCharges: { home: 5, away: 5 },
+    sprintTarget: null,
   };
 }
 
@@ -1992,19 +2070,50 @@ function throughBall(state, x, y) {
   return s;
 }
 
-function sprintBoost(state, team) {
+function sprintStart(state, team, playerId) {
   if (state.phase !== 'play') return state;
-  if (!state.ball.carrier) return state;
-  if (state.sprintCharges[team] <= 0) return state;
-
-  var carrier = state.players.find(function(p) { return p.id === state.ball.carrier; });
-  if (!carrier || carrier.team !== team) return state;
-  if (carrier.sprintBoostUntil > state.tick) return state; // already boosted, don't waste charge
+  var target = state.players.find(function(p) { return p.id === playerId; });
+  if (!target || target.team !== team) return state;
+  if (target.fatigued) return state;
+  if (target.sprintActive) return state;
 
   var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
-  var c = s.players.find(function(p) { return p.id === carrier.id; });
-  c.sprintBoostUntil = s.tick + SPRINT_BOOST_TICKS;
-  s.sprintCharges = { ...s.sprintCharges, [team]: s.sprintCharges[team] - 1 };
+
+  // End existing sprint target with proportional fatigue
+  if (s.sprintTarget && s.sprintTarget !== playerId) {
+    var old = s.players.find(function(p) { return p.id === s.sprintTarget; });
+    if (old && old.sprintActive) {
+      old.sprintActive = false;
+      old.sprintMeter = 0;
+      old.fatigued = true;
+      old.fatigueStartTick = s.tick;
+      var recov = Math.max(FATIGUE_MIN_RECOVERY, Math.round(FATIGUE_RECOVERY_COEFF * Math.pow(Math.min(old.sprintSwipes, 12), FATIGUE_RECOVERY_EXP)));
+      old.fatigueRecoveryTick = s.tick + recov;
+    }
+  }
+
+  var t = s.players.find(function(p) { return p.id === playerId; });
+  t.sprintActive = true;
+  t.sprintMeter = SPRINT_INITIAL_FILL;
+  t.sprintStartTick = s.tick;
+  t.sprintSwipes = 2;
+  t.lastSwipeTick = s.tick;
+  s.sprintTarget = playerId;
+  AudioSys.kick();
+  return s;
+}
+
+function sprintSwipe(state, team) {
+  if (!state.sprintTarget) return state;
+  var target = state.players.find(function(p) { return p.id === state.sprintTarget; });
+  if (!target || !target.sprintActive || target.team !== team) return state;
+
+  var s = { ...state, players: state.players.map(function(p) { return { ...p }; }) };
+  var t = s.players.find(function(p) { return p.id === state.sprintTarget; });
+  t.sprintSwipes++;
+  t.lastSwipeTick = s.tick;
+  var fillAmount = SPRINT_FILL_PER_SWIPE * Math.pow(SPRINT_FILL_DECAY, Math.max(0, t.sprintSwipes - 3));
+  t.sprintMeter = Math.min(1.0, t.sprintMeter + fillAmount);
   return s;
 }
 
@@ -2147,6 +2256,7 @@ function App() {
   const lastSyncRef = useRef(0);
   const [fieldDims, setFieldDims] = useState({ width: 600, height: 400 });
   var dragRef = useRef({ active: false, isDown: false, playerId: null, startX: 0, startY: 0, startGx: 0, startGy: 0, startTime: 0, lastGx: 0, lastGy: 0, waypoints: [] });
+  var sprintRef = useRef({ swipeCount: 0, lastSwipeTime: 0, barGx: 0, barGy: 0, barAngle: 0 });
   var coachToolState = React.useState('route');
   var coachTool = coachToolState[0];
   var setCoachTool = coachToolState[1];
@@ -2464,7 +2574,7 @@ function App() {
         dispatchAndSend({ type: 'SET_ROUTE', playerId: dr.playerId, route: dr.waypoints.slice() });
       }
 
-      // SWIPE SPRINT: empty field fast swipe = speed boost for carrier
+      // ANALOG SPRINT: empty field swipe detection
       if (dr.playerId === null && dr.mode === 'player') {
         var swipeDuration = Date.now() - dr.startTime;
         var rectSwipe = fieldRef.current.getBoundingClientRect();
@@ -2476,14 +2586,41 @@ function App() {
           (swipeGx - dr.startGx) * (swipeGx - dr.startGx) +
           (swipeGy - dr.startGy) * (swipeGy - dr.startGy)
         );
-        if (swipeDuration < SWIPE_MAX_DURATION_MS && swipeDist >= SWIPE_MIN_DISTANCE) {
+        if (swipeDuration < SPRINT_SWIPE_MAX_MS && swipeDist >= SPRINT_SWIPE_MIN_DIST) {
+          var now = Date.now();
+          var sr = sprintRef.current;
+          // Reset swipe count if too much time between swipes
+          if (now - sr.lastSwipeTime > SPRINT_CONSECUTIVE_WINDOW_MS) {
+            sr.swipeCount = 0;
+          }
+          sr.swipeCount++;
+          sr.lastSwipeTime = now;
+          // Store bar position and angle from this swipe
+          sr.barGx = (dr.startGx + swipeGx) / 2;
+          sr.barGy = (dr.startGy + swipeGy) / 2;
+          sr.barAngle = Math.atan2(swipeGy - dr.startGy, swipeGx - dr.startGx) * (180 / Math.PI);
+
           var swipeState = stateRef.current;
-          if (swipeState.ball.carrier && swipeState.sprintCharges[localTeam] > 0) {
-            var swipeCarrier = swipeState.players.find(function(p) { return p.id === swipeState.ball.carrier; });
-            if (swipeCarrier && swipeCarrier.team === localTeam) {
-              AudioSys.kick();
-              dispatchAndSend({ type: 'SPRINT_BOOST', team: localTeam });
+          if (sr.swipeCount === 2) {
+            // Determine sprint target
+            var sprintTargetId = null;
+            if (swipeState.ball.carrier) {
+              var swipeCarrier = swipeState.players.find(function(p) { return p.id === swipeState.ball.carrier; });
+              if (swipeCarrier && swipeCarrier.team === localTeam && !swipeCarrier.fatigued) {
+                sprintTargetId = swipeCarrier.id;
+              }
             }
+            if (!sprintTargetId && swipeState.selectedDefender) {
+              var swipeDef = swipeState.players.find(function(p) { return p.id === swipeState.selectedDefender; });
+              if (swipeDef && swipeDef.team === localTeam && !swipeDef.fatigued) {
+                sprintTargetId = swipeDef.id;
+              }
+            }
+            if (sprintTargetId) {
+              dispatchAndSend({ type: 'SPRINT_START', team: localTeam, playerId: sprintTargetId });
+            }
+          } else if (sr.swipeCount > 2 && swipeState.sprintTarget) {
+            dispatchAndSend({ type: 'SPRINT_SWIPE', team: localTeam });
           }
         }
       }
@@ -2647,7 +2784,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.8.0'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.8.1'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -2966,20 +3103,77 @@ function App() {
           });
         })(),
 
-        // Sprint boost rings (persist on any boosted player, even after passing)
-        ...gameState.players.filter(function(p) {
-          return p.sprintBoostUntil && p.sprintBoostUntil > gameState.tick;
-        }).map(function(p) {
-          return React.createElement('circle', {
-            key: 'sprint-ring-' + p.id,
-            cx: p.x * ppu, cy: p.y * ypu,
+        // Sprint active ring (pulsing orange ring on sprinting player)
+        ...(function() {
+          if (!gameState.sprintTarget) return [];
+          var sp = gameState.players.find(function(p) { return p.id === gameState.sprintTarget; });
+          if (!sp || !sp.sprintActive) return [];
+          return [React.createElement('circle', {
+            key: 'sprint-ring-' + sp.id,
+            cx: sp.x * ppu, cy: sp.y * ypu,
             r: Math.max(22, ppu * 2.8),
             fill: 'none', stroke: '#ff6b00',
-            strokeWidth: 2,
-            opacity: 0.6 + 0.4 * Math.sin(gameState.tick * 0.4),
+            strokeWidth: 2 + sp.sprintMeter,
+            opacity: 0.5 + 0.5 * sp.sprintMeter,
             strokeDasharray: '4 2',
-          });
+          })];
+        })(),
+
+        // Fatigue recovery bars (small bar above fatigued players)
+        ...gameState.players.filter(function(p) {
+          return p.fatigued;
+        }).map(function(p) {
+          var totalRecov = p.fatigueRecoveryTick - p.fatigueStartTick;
+          var elapsed = gameState.tick - p.fatigueStartTick;
+          var progress = totalRecov > 0 ? Math.min(1, elapsed / totalRecov) : 0;
+          var barW = Math.max(20, ppu * 3);
+          var barH = Math.max(3, ypu * 0.4);
+          var bx = p.x * ppu - barW / 2;
+          var by = p.y * ypu - Math.max(18, ppu * 2.2) - barH - 4;
+          return React.createElement('g', { key: 'fatigue-bar-' + p.id },
+            React.createElement('rect', {
+              x: bx, y: by, width: barW, height: barH,
+              rx: barH / 2,
+              fill: 'rgba(0,0,0,0.5)', stroke: 'rgba(255,255,255,0.3)', strokeWidth: 0.5,
+            }),
+            React.createElement('rect', {
+              x: bx, y: by, width: barW * progress, height: barH,
+              rx: barH / 2,
+              fill: progress < 0.5 ? '#ef4444' : progress < 0.8 ? '#f59e0b' : '#22c55e',
+            })
+          );
         }),
+
+        // Sprint meter bar at swipe location
+        ...(function() {
+          if (!gameState.sprintTarget) return [];
+          var sp = gameState.players.find(function(p) { return p.id === gameState.sprintTarget; });
+          if (!sp || !sp.sprintActive || sp.sprintMeter <= 0) return [];
+          var sr = sprintRef.current;
+          var barW = Math.max(40, ppu * 6);
+          var barH = Math.max(6, ypu * 0.7);
+          var cx = sr.barGx * ppu;
+          var cy = sr.barGy * ypu;
+          return [
+            React.createElement('g', {
+              key: 'sprint-bar',
+              transform: 'rotate(' + sr.barAngle + ' ' + cx + ' ' + cy + ')',
+            },
+              // Background
+              React.createElement('rect', {
+                x: cx - barW / 2, y: cy - barH / 2,
+                width: barW, height: barH, rx: barH / 2,
+                fill: 'rgba(0,0,0,0.6)', stroke: 'rgba(255,255,255,0.3)', strokeWidth: 0.5,
+              }),
+              // Fill
+              React.createElement('rect', {
+                x: cx - barW / 2, y: cy - barH / 2,
+                width: barW * sp.sprintMeter, height: barH, rx: barH / 2,
+                fill: sp.sprintMeter > 0.5 ? '#ff6b00' : sp.sprintMeter > 0.25 ? '#f59e0b' : '#ef4444',
+              })
+            )
+          ];
+        })(),
 
         // Selected defender ring
         gameState.selectedDefender ? (function() {
@@ -3008,7 +3202,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.8.0'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.8.1'),
       // HUD overlay - score/half/clock
       !gameState.drillMode ? React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
@@ -3130,7 +3324,7 @@ function App() {
             ),
             React.createElement('div', { style: { marginBottom: '8px' } },
               React.createElement('span', { style: { color: '#ff6b00', fontWeight: 'bold' } }, 'SWIPE'),
-              ' the field for a speed burst'
+              ' the field twice to sprint -- but be careful, your player will get fatigued!'
             ),
             React.createElement('div', null,
               React.createElement('span', { style: { color: '#059669', fontWeight: 'bold' } }, 'PAUSE'),
@@ -3423,42 +3617,9 @@ function App() {
         }, btnLabel);
       })() : null,
 
-      // Sprint charges HUD
-      !sandboxMode && !gameState.drillMode && (gameState.phase === 'play' || gameState.phase === 'shot') ? React.createElement('div', {
-        key: 'sprint-hud',
-        style: {
-          position: 'absolute',
-          bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
-          left: 'calc(12px + env(safe-area-inset-left, 0px))',
-          zIndex: 20,
-          pointerEvents: 'none',
-          display: 'flex',
-          gap: '4px',
-          alignItems: 'center',
-        }
-      },
-        ...(function() {
-          var pips = [];
-          var charges = localTeam === 'home' ? gameState.sprintCharges.home : gameState.sprintCharges.away;
-          for (var si = 0; si < SPRINT_CHARGES_PER_HALF; si++) {
-            pips.push(React.createElement('div', {
-              key: 'pip-' + si,
-              style: {
-                width: '10px',
-                height: '10px',
-                borderRadius: '50%',
-                background: si < charges ? '#ffd700' : 'rgba(255,255,255,0.2)',
-                border: '1px solid rgba(255,255,255,0.4)',
-                transition: 'background 0.3s',
-              }
-            }));
-          }
-          return pips;
-        })(),
-        React.createElement('span', {
-          style: { color: 'rgba(255,255,255,0.5)', fontSize: '0.7em', marginLeft: '4px' }
-        }, 'SPRINT')
-      ) : null,
+      // Sprint meter bar (rendered at swipe location on field via SVG overlay)
+      // This is handled in the SVG field layer, not as a HUD div.
+      null,
 
       // Tactical pause overlay (not shown in sandbox -- sandbox has its own toolbar)
       gameState.tacticalPaused && !sandboxMode ? React.createElement('div', {
