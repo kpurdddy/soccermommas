@@ -2256,7 +2256,7 @@ function App() {
   const lastSyncRef = useRef(0);
   const [fieldDims, setFieldDims] = useState({ width: 600, height: 400 });
   var dragRef = useRef({ active: false, isDown: false, playerId: null, startX: 0, startY: 0, startGx: 0, startGy: 0, startTime: 0, lastGx: 0, lastGy: 0, waypoints: [] });
-  var sprintRef = useRef({ swipeCount: 0, lastSwipeTime: 0, barGx: 0, barGy: 0, barAngle: 0 });
+  var sprintRef = useRef({ swipeCount: 0, lastSwipeTime: 0, barGx: 0, barGy: 0, barAngle: 0, previewing: false, previewMeter: 0 });
   var coachToolState = React.useState('route');
   var coachTool = coachToolState[0];
   var setCoachTool = coachToolState[1];
@@ -2491,8 +2491,25 @@ function App() {
         return;
       }
 
-      // ROUTE tool (or normal live play): sample waypoints
-      if (dr.playerId === null) return;
+      // Sprint preview: mid-second-swipe, show bar filling with finger movement
+      if (dr.playerId === null) {
+        var sr = sprintRef.current;
+        if (sr.swipeCount === 1 && (Date.now() - sr.lastSwipeTime) < SPRINT_CONSECUTIVE_WINDOW_MS) {
+          var prevDist = Math.sqrt((gx - dr.startGx) * (gx - dr.startGx) + (gy - dr.startGy) * (gy - dr.startGy));
+          var prevThreshold = SPRINT_SWIPE_MIN_DIST * 0.25;
+          if (prevDist >= prevThreshold) {
+            var prevProgress = Math.min(1.0, (prevDist - prevThreshold) / (SPRINT_SWIPE_MIN_DIST - prevThreshold));
+            sr.previewing = true;
+            sr.previewMeter = prevProgress * SPRINT_INITIAL_FILL;
+            if (sr.barGx === 0 && sr.barGy === 0) {
+              sr.barGx = (dr.startGx + gx) / 2;
+              sr.barGy = (dr.startGy + gy) / 2;
+              sr.barAngle = Math.atan2(gy - dr.startGy, gx - dr.startGx) * (180 / Math.PI);
+            }
+          }
+        }
+        return;
+      }
       var lastWp = dr.waypoints.length > 0 ? dr.waypoints[dr.waypoints.length - 1] : { x: dr.startGx, y: dr.startGy };
       var wpDist = Math.sqrt((gx - lastWp.x) * (gx - lastWp.x) + (gy - lastWp.y) * (gy - lastWp.y));
       if (wpDist >= 3) {
@@ -2592,16 +2609,24 @@ function App() {
           // Reset swipe count if too much time between swipes
           if (now - sr.lastSwipeTime > SPRINT_CONSECUTIVE_WINDOW_MS) {
             sr.swipeCount = 0;
+            sr.barGx = 0;
+            sr.barGy = 0;
+            sr.barAngle = 0;
           }
           sr.swipeCount++;
           sr.lastSwipeTime = now;
-          // Store bar position and angle from this swipe
-          sr.barGx = (dr.startGx + swipeGx) / 2;
-          sr.barGy = (dr.startGy + swipeGy) / 2;
-          sr.barAngle = Math.atan2(swipeGy - dr.startGy, swipeGx - dr.startGx) * (180 / Math.PI);
+          sr.previewing = false;
+          sr.previewMeter = 0;
 
           var swipeState = stateRef.current;
           if (sr.swipeCount === 2) {
+            // Lock bar position from preview (or compute fresh if preview didn't fire)
+            if (sr.barGx === 0 && sr.barGy === 0) {
+              sr.barGx = (dr.startGx + swipeGx) / 2;
+              sr.barGy = (dr.startGy + swipeGy) / 2;
+              sr.barAngle = Math.atan2(swipeGy - dr.startGy, swipeGx - dr.startGx) * (180 / Math.PI);
+            }
+            // Position is now locked -- subsequent swipes do NOT update barGx/barGy/barAngle
             // Determine sprint target
             var sprintTargetId = null;
             if (swipeState.ball.carrier) {
@@ -2620,8 +2645,14 @@ function App() {
               dispatchAndSend({ type: 'SPRINT_START', team: localTeam, playerId: sprintTargetId });
             }
           } else if (sr.swipeCount > 2 && swipeState.sprintTarget) {
+            // Bar stays in place -- only meter changes
             dispatchAndSend({ type: 'SPRINT_SWIPE', team: localTeam });
           }
+        } else {
+          // Swipe didn't qualify -- clear preview
+          var sr2 = sprintRef.current;
+          sr2.previewing = false;
+          sr2.previewMeter = 0;
         }
       }
 
@@ -2784,7 +2815,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.8.1'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.8.2'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -3119,18 +3150,28 @@ function App() {
           })];
         })(),
 
-        // Fatigue recovery bars (small bar above fatigued players)
+        // Stamina bar above player head (visible during sprint AND fatigue recovery)
         ...gameState.players.filter(function(p) {
-          return p.fatigued;
+          return p.sprintActive || p.fatigued;
         }).map(function(p) {
-          var totalRecov = p.fatigueRecoveryTick - p.fatigueStartTick;
-          var elapsed = gameState.tick - p.fatigueStartTick;
-          var progress = totalRecov > 0 ? Math.min(1, elapsed / totalRecov) : 0;
+          var progress;
+          var fillColor;
+          if (p.sprintActive) {
+            // During sprint: bar starts full and drains with the sprint meter
+            progress = p.sprintMeter;
+            fillColor = progress > 0.5 ? '#22c55e' : progress > 0.25 ? '#f59e0b' : '#ef4444';
+          } else {
+            // During fatigue recovery: bar fills back up from empty
+            var totalRecov = p.fatigueRecoveryTick - p.fatigueStartTick;
+            var elapsed = gameState.tick - p.fatigueStartTick;
+            progress = totalRecov > 0 ? Math.min(1, elapsed / totalRecov) : 0;
+            fillColor = progress < 0.5 ? '#ef4444' : progress < 0.8 ? '#f59e0b' : '#22c55e';
+          }
           var barW = Math.max(20, ppu * 3);
           var barH = Math.max(3, ypu * 0.4);
           var bx = p.x * ppu - barW / 2;
           var by = p.y * ypu - Math.max(18, ppu * 2.2) - barH - 4;
-          return React.createElement('g', { key: 'fatigue-bar-' + p.id },
+          return React.createElement('g', { key: 'stamina-bar-' + p.id },
             React.createElement('rect', {
               x: bx, y: by, width: barW, height: barH,
               rx: barH / 2,
@@ -3139,37 +3180,54 @@ function App() {
             React.createElement('rect', {
               x: bx, y: by, width: barW * progress, height: barH,
               rx: barH / 2,
-              fill: progress < 0.5 ? '#ef4444' : progress < 0.8 ? '#f59e0b' : '#22c55e',
+              fill: fillColor,
             })
           );
         }),
 
-        // Sprint meter bar at swipe location
+        // Sprint meter bar at swipe location (or preview during second swipe)
         ...(function() {
-          if (!gameState.sprintTarget) return [];
-          var sp = gameState.players.find(function(p) { return p.id === gameState.sprintTarget; });
-          if (!sp || !sp.sprintActive || sp.sprintMeter <= 0) return [];
           var sr = sprintRef.current;
-          var barW = Math.max(40, ppu * 6);
-          var barH = Math.max(6, ypu * 0.7);
+          var meterVal = 0;
+          var isPreview = false;
+
+          // Active sprint bar
+          if (gameState.sprintTarget) {
+            var sp = gameState.players.find(function(p) { return p.id === gameState.sprintTarget; });
+            if (sp && sp.sprintActive && sp.sprintMeter > 0) {
+              meterVal = sp.sprintMeter;
+            }
+          }
+          // Preview bar (mid-second-swipe, before sprint activates)
+          if (meterVal === 0 && sr.previewing && sr.previewMeter > 0) {
+            meterVal = sr.previewMeter;
+            isPreview = true;
+          }
+
+          if (meterVal <= 0 || (sr.barGx === 0 && sr.barGy === 0)) return [];
+
+          var barW = Math.max(60, ppu * 10);
+          var barH = Math.max(10, ypu * 1.2);
           var cx = sr.barGx * ppu;
           var cy = sr.barGy * ypu;
+          var fillColor = meterVal > 0.5 ? '#ff6b00' : meterVal > 0.25 ? '#f59e0b' : '#ef4444';
           return [
             React.createElement('g', {
               key: 'sprint-bar',
               transform: 'rotate(' + sr.barAngle + ' ' + cx + ' ' + cy + ')',
+              opacity: isPreview ? 0.8 : 1.0,
             },
-              // Background
+              // Background frame
               React.createElement('rect', {
                 x: cx - barW / 2, y: cy - barH / 2,
-                width: barW, height: barH, rx: barH / 2,
-                fill: 'rgba(0,0,0,0.6)', stroke: 'rgba(255,255,255,0.3)', strokeWidth: 0.5,
+                width: barW, height: barH,
+                fill: 'rgba(0,0,0,0.6)', stroke: '#ef4444', strokeWidth: 1.5,
               }),
               // Fill
               React.createElement('rect', {
-                x: cx - barW / 2, y: cy - barH / 2,
-                width: barW * sp.sprintMeter, height: barH, rx: barH / 2,
-                fill: sp.sprintMeter > 0.5 ? '#ff6b00' : sp.sprintMeter > 0.25 ? '#f59e0b' : '#ef4444',
+                x: cx - barW / 2 + 1, y: cy - barH / 2 + 1,
+                width: (barW - 2) * meterVal, height: barH - 2,
+                fill: fillColor,
               })
             )
           ];
@@ -3202,7 +3260,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.8.1'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.8.2'),
       // HUD overlay - score/half/clock
       !gameState.drillMode ? React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },

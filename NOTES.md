@@ -1,5 +1,13 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.8.2
+
+- Sprint bar now appears mid-second-swipe (at 25% of swipe distance) and fills tracking finger movement
+- Sprint bar position locks on activation -- subsequent swipes fill the meter but bar stays put
+- Sprint bar visual: larger, sharp corners, red border frame
+- Preview bar cleans up if second swipe doesn't qualify (too slow or too short)
+- Stamina bar above player head appears immediately on sprint start (green, draining to yellow to red) and continues through fatigue recovery
+
 ## Alpha 2.8.1
 - Replaced pip-based sprint system with analog sprint meter
   - 2 quick swipes on empty field to activate (bar appears at ~70% full)
