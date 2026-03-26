@@ -1,5 +1,12 @@
 # Soccer Mamas -- Build Notes
 
+## Alpha 2.8.3
+
+- Increased sprint drain rate from 0.008 to 0.025 (sprint is now a burst, not a cruise)
+- Reduced drain delay from 15 ticks to 8 ticks (fuel starts burning sooner after each swipe)
+- Defense sprint fallback: if no defender is selected, sprint activates the nearest friendly non-GK player to the swipe location
+- Tutorial text: all lines use hanging indent so wrapped text doesn't sit flush left
+
 ## Alpha 2.8.2
 
 - Sprint bar now appears mid-second-swipe (at 25% of swipe distance) and fills tracking finger movement

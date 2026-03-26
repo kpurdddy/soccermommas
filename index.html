@@ -150,8 +150,8 @@ const OOB_PAUSE_TICKS = 15; // 0.5s
 const SPRINT_INITIAL_FILL = 0.70;       // meter level on activation (after 2 swipes)
 const SPRINT_FILL_PER_SWIPE = 0.15;     // fuel added per swipe (before decay)
 const SPRINT_FILL_DECAY = 0.65;         // each swipe past the 3rd fills less (multiplied per extra swipe)
-const SPRINT_DRAIN_RATE = 0.008;        // meter drain per tick while sprinting
-const SPRINT_DRAIN_DELAY_TICKS = 15;    // ticks after last swipe before drain starts (~500ms)
+const SPRINT_DRAIN_RATE = 0.025;        // meter drain per tick while sprinting
+const SPRINT_DRAIN_DELAY_TICKS = 8;     // ticks after last swipe before drain starts (~267ms)
 const FATIGUE_SPEED_MULT = 0.6;         // speed multiplier when fatigued (below normal)
 const FATIGUE_RECOVERY_COEFF = 0.85;    // recovery formula coefficient (tuning constant)
 const FATIGUE_RECOVERY_EXP = 2.7;       // recovery formula exponent (tuning constant)
@@ -2629,16 +2629,38 @@ function App() {
             // Position is now locked -- subsequent swipes do NOT update barGx/barGy/barAngle
             // Determine sprint target
             var sprintTargetId = null;
+            // 1. Offense: ball carrier
             if (swipeState.ball.carrier) {
               var swipeCarrier = swipeState.players.find(function(p) { return p.id === swipeState.ball.carrier; });
               if (swipeCarrier && swipeCarrier.team === localTeam && !swipeCarrier.fatigued) {
                 sprintTargetId = swipeCarrier.id;
               }
             }
+            // 2. Defense: selected defender
             if (!sprintTargetId && swipeState.selectedDefender) {
               var swipeDef = swipeState.players.find(function(p) { return p.id === swipeState.selectedDefender; });
               if (swipeDef && swipeDef.team === localTeam && !swipeDef.fatigued) {
                 sprintTargetId = swipeDef.id;
+              }
+            }
+            // 3. Defense fallback: nearest friendly non-GK player to swipe location
+            if (!sprintTargetId) {
+              var swipeMidGx = (dr.startGx + swipeGx) / 2;
+              var swipeMidGy = (dr.startGy + swipeGy) / 2;
+              var nearestDist = Infinity;
+              for (var ni = 0; ni < swipeState.players.length; ni++) {
+                var np = swipeState.players[ni];
+                if (np.team !== localTeam) continue;
+                if (np.role === 'GK') continue;
+                if (np.fatigued) continue;
+                if (np.sprintActive) continue;
+                var ndx = np.x - swipeMidGx;
+                var ndy = np.y - swipeMidGy;
+                var nd = Math.sqrt(ndx * ndx + ndy * ndy);
+                if (nd < nearestDist) {
+                  nearestDist = nd;
+                  sprintTargetId = np.id;
+                }
               }
             }
             if (sprintTargetId) {
@@ -2815,7 +2837,7 @@ function App() {
         React.createElement('div', { className: 'subtitle' },
           'a ', React.createElement('em', null, "Nicole's a Total Baller!"), ' Production'
         ),
-        React.createElement('div', { className: 'version' }, 'Alpha 2.8.2'),
+        React.createElement('div', { className: 'version' }, 'Alpha 2.8.3'),
         titleMode === 'menu' ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' } },
           React.createElement('button', { onClick: startSoloGame }, 'PLAY SOLO'),
           React.createElement('button', {
@@ -3260,7 +3282,7 @@ function App() {
       ),
 
       // HUD overlay - version text (after SVG so DOM order and z-index both agree it's on top)
-      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.8.2'),
+      React.createElement('div', { className: 'hud-version' }, 'Alpha 2.8.3'),
       // HUD overlay - score/half/clock
       !gameState.drillMode ? React.createElement('div', { className: 'hud-overlay' },
         React.createElement('div', { className: 'hud-pill' },
@@ -3364,27 +3386,27 @@ function App() {
           React.createElement('div', {
             style: { fontSize: Math.max(16, fw * 0.03) + 'px', lineHeight: '2.2', textAlign: 'left', display: 'inline-block' }
           },
-            React.createElement('div', { style: { marginBottom: '8px' } },
+            React.createElement('div', { style: { marginBottom: '8px', paddingLeft: '0.5em', textIndent: '-0.5em' } },
               React.createElement('span', { style: { color: '#60a5fa', fontWeight: 'bold' } }, 'DRAW'),
               ' routes for your players to follow'
             ),
-            React.createElement('div', { style: { marginBottom: '8px' } },
+            React.createElement('div', { style: { marginBottom: '8px', paddingLeft: '0.5em', textIndent: '-0.5em' } },
               React.createElement('span', { style: { color: '#60a5fa', fontWeight: 'bold' } }, 'TAP'),
               ' a teammate to pass'
             ),
-            React.createElement('div', { style: { marginBottom: '8px' } },
+            React.createElement('div', { style: { marginBottom: '8px', paddingLeft: '0.5em', textIndent: '-0.5em' } },
               React.createElement('span', { style: { color: '#60a5fa', fontWeight: 'bold' } }, 'TAP'),
               ' the goal area to shoot'
             ),
-            React.createElement('div', { style: { marginBottom: '8px' } },
+            React.createElement('div', { style: { marginBottom: '8px', paddingLeft: '0.5em', textIndent: '-0.5em' } },
               React.createElement('span', { style: { color: '#60a5fa', fontWeight: 'bold' } }, 'TAP'),
               ' empty space for a through ball'
             ),
-            React.createElement('div', { style: { marginBottom: '8px' } },
+            React.createElement('div', { style: { marginBottom: '8px', paddingLeft: '0.5em', textIndent: '-0.5em' } },
               React.createElement('span', { style: { color: '#ff6b00', fontWeight: 'bold' } }, 'SWIPE'),
               ' the field twice to sprint -- but be careful, your player will get fatigued!'
             ),
-            React.createElement('div', null,
+            React.createElement('div', { style: { paddingLeft: '0.5em', textIndent: '-0.5em' } },
               React.createElement('span', { style: { color: '#059669', fontWeight: 'bold' } }, 'PAUSE'),
               ' button for tactical timeouts'
             )
